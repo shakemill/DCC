@@ -1,0 +1,179 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(uuid())
+  name             String    @db.VarChar(255)
+  email            String    @unique @db.VarChar(255)
+  password         String    @db.VarChar(255)
+  emailVerified    Boolean   @default(false)
+  verificationToken String?  @db.VarChar(255)
+  verificationTokenExpires DateTime? @db.Timestamp(6)
+  createdAt        DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamp(6)
+
+  @@map("users")
+}
+
+model IncomePlan {
+  id               String   @id @default(uuid())
+  userId           String?  @db.VarChar(255)
+  loanAmount       Decimal  @db.Decimal(20, 2)
+  incomeObjective  Decimal? @db.Decimal(20, 2)
+  currency         String   @db.VarChar(10)
+  riskTolerance    Int
+  ltv              Decimal  @db.Decimal(5, 2)
+  collateralUSD   Decimal  @db.Decimal(20, 2)
+  collateralBTC   Decimal  @db.Decimal(20, 8)
+  bitcoinPrice     Decimal  @db.Decimal(20, 2)
+  createdAt        DateTime @default(now()) @db.Timestamp(6)
+  updatedAt        DateTime @updatedAt @db.Timestamp(6)
+
+  suitabilityReports SuitabilityReport[]
+
+  @@map("income_plans")
+}
+
+enum DccModule {
+  M1A
+  M1B
+  M1C
+}
+
+enum RateType {
+  Fixed
+  Variable
+  QuoteBased
+  Promo
+  Unknown
+}
+
+enum ReportType {
+  Suitability
+  Income
+  Risk
+}
+
+enum VenueType {
+  DeFi
+  CeFi
+  RWA
+}
+
+model DatasetVersion {
+  id          String   @id @default(uuid())
+  version     String   @unique @db.VarChar(32)
+  description String?  @db.Text
+  effectiveAt DateTime @db.Timestamp(6)
+  createdAt   DateTime @default(now()) @db.Timestamp(6)
+
+  instruments       Instrument[]
+  suitabilityReports SuitabilityReport[]
+
+  @@map("dataset_versions")
+}
+
+model Instrument {
+  id                String    @id @default(uuid())
+  module            DccModule
+  datasetVersionId  String?   @db.VarChar(255)
+  issuer            String    @db.VarChar(255)
+  productName       String    @db.VarChar(512)
+  collateral        String    @db.VarChar(255)
+  jurisdiction      String    @db.VarChar(255)
+  lockup            String    @db.VarChar(255)
+  seniority         String    @db.VarChar(255)
+  notes             String?   @db.Text
+  sources           Json?     // URLs array
+  apyLabel          String?   @db.VarChar(255)
+  duration          String?   @db.VarChar(255)
+  promoFlag         Boolean   @default(false)
+  unverifiableReason String?  @db.Text
+  internalSources   Json?
+  createdAt         DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamp(6)
+
+  // 1A
+  ltvTypical            Decimal?  @db.Decimal(5, 2)
+  marginCallLtv         Decimal?  @db.Decimal(5, 2)
+  liquidationLtv        Decimal?  @db.Decimal(5, 2)
+  liquidationPenalty    String?   @db.VarChar(255)
+  rehypothecationPolicy String?   @db.VarChar(255)
+  contractingEntity     String?   @db.VarChar(255)
+  governingLaw          String?   @db.VarChar(255)
+  regionEligibility     Json?
+  minLoanSize           Decimal?  @db.Decimal(20, 2)
+  accreditedOnly        Boolean?  @default(false)
+  feeOrigination        String?   @db.VarChar(255)
+  feeAdmin              String?   @db.VarChar(255)
+  feeSpread             String?   @db.VarChar(255)
+
+  // 1B
+  cusip                   String?  @db.VarChar(32)
+  isin                    String?  @db.VarChar(32)
+  dividendRate            Decimal? @db.Decimal(10, 4)
+  paymentFrequency        String?  @db.VarChar(64)
+  coupon                  Decimal? @db.Decimal(10, 4)
+  maturity                String?  @db.VarChar(255)
+  conversionTriggers      String?  @db.VarChar(255)
+  isYield                 Boolean? @default(true)
+  secYield                Decimal? @db.Decimal(10, 4)
+  trailingDistributionRate Decimal? @db.Decimal(10, 4)
+
+  // 1C
+  venueType       VenueType?
+  supportedAsset  String?    @db.VarChar(32)
+  chain           String?    @db.VarChar(64)
+  userTier        String?    @db.VarChar(64)
+  noticePeriod    String?    @db.VarChar(128)
+  redemptionGates String?    @db.VarChar(255)
+  dailyLimit      String?    @db.VarChar(128)
+  riskTags        Json?      // ["peg","counterparty",...]
+
+  datasetVersion DatasetVersion? @relation(fields: [datasetVersionId], references: [id], onDelete: SetNull)
+  snapshots      InstrumentSnapshot[]
+
+  @@map("instruments")
+}
+
+model InstrumentSnapshot {
+  id              String   @id @default(uuid())
+  instrumentId    String   @db.VarChar(255)
+  asOf            DateTime @db.Timestamp(6)
+  apyMin          Decimal? @db.Decimal(10, 4)
+  apyMax          Decimal? @db.Decimal(10, 4)
+  rateType        RateType
+  apyLabelOverride String? @db.VarChar(255)
+  promoFlag       Boolean  @default(false)
+  sourceUrl       String?  @db.VarChar(512)
+  createdAt       DateTime @default(now()) @db.Timestamp(6)
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@index([instrumentId])
+  @@map("instrument_snapshots")
+}
+
+model SuitabilityReport {
+  id                String     @id @default(uuid())
+  userId            String     @db.VarChar(255)
+  incomePlanId      String?    @db.VarChar(255)
+  datasetVersionId  String?    @db.VarChar(255)
+  reportType        ReportType
+  frozenData        Json       // instruments + snapshots + plan params
+  createdAt         DateTime   @default(now()) @db.Timestamp(6)
+
+  datasetVersion DatasetVersion? @relation(fields: [datasetVersionId], references: [id], onDelete: SetNull)
+  incomePlan     IncomePlan?    @relation(fields: [incomePlanId], references: [id], onDelete: SetNull)
+
+  @@map("suitability_reports")
+}
