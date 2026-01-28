@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import ProtectedFeature from "@/components/ProtectedFeature"
@@ -27,7 +27,7 @@ function formatApy(instrument) {
   return instrument?.apyLabel ?? "—"
 }
 
-export default function YieldBoardComparePage() {
+function YieldBoardCompareContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [instruments, setInstruments] = useState([])
@@ -218,5 +218,21 @@ export default function YieldBoardComparePage() {
         </div>
       </>
     </ProtectedFeature>
+  )
+}
+
+export default function YieldBoardComparePage() {
+  return (
+    <Suspense
+      fallback={
+        <ProtectedFeature featureName="Yield Board">
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="text-slate-600 dark:text-slate-400">Loading comparison…</div>
+          </div>
+        </ProtectedFeature>
+      }
+    >
+      <YieldBoardCompareContent />
+    </Suspense>
   )
 }
