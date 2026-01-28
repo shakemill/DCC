@@ -1,3 +1,4 @@
+require('dotenv/config')
 const { PrismaClient, Prisma, DccModule, RateType, VenueType } = require('@prisma/client')
 
 const prisma = new PrismaClient()
