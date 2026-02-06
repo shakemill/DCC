@@ -10,9 +10,13 @@ function formatApy(instrument) {
   const s = instrument?.latestSnapshot
   if (!s) return instrument?.apyLabel ?? "—"
   if (s.apyLabelOverride) return s.apyLabelOverride
-  if (s.apyMin != null && s.apyMax != null && s.apyMin !== s.apyMax) return `${s.apyMin}% – ${s.apyMax}%`
-  if (s.apyMin != null) return `${s.apyMin}%`
-  if (s.apyMax != null) return `${s.apyMax}%`
+  const min = s.apyMin != null ? Number(s.apyMin) : null
+  const max = s.apyMax != null ? Number(s.apyMax) : null
+  if (min == null && max == null) return instrument?.apyLabel ?? "—"
+  if (min === 0 && max === 0) return "—"
+  if (min != null && max != null && min !== max) return `${min}% – ${max}%`
+  if (min != null) return `${min}%`
+  if (max != null) return `${max}%`
   return instrument?.apyLabel ?? "—"
 }
 
@@ -135,14 +139,65 @@ export default function YieldBoardDetailsPage() {
                       <p className="text-sm text-slate-500 mb-1">Jurisdiction</p>
                       <p className="font-semibold text-slate-900 dark:text-slate-900">{instrument.jurisdiction ?? "—"}</p>
                     </div>
+                    {(instrument.paymentFrequency || instrument.module === "M1B") && (
+                      <div>
+                        <p className="text-sm text-slate-500 mb-1">Payment frequency</p>
+                        <p className="font-semibold text-slate-900 dark:text-slate-900">{instrument.paymentFrequency ?? "—"}</p>
+                      </div>
+                    )}
+                    {(instrument.ticker || instrument.cusip || instrument.isin) && (
+                      <>
+                        {instrument.ticker && (
+                          <div>
+                            <p className="text-sm text-slate-500 mb-1">Ticker</p>
+                            <p className="font-semibold text-slate-900 dark:text-slate-900">{instrument.ticker}</p>
+                          </div>
+                        )}
+                        {instrument.cusip && (
+                          <div>
+                            <p className="text-sm text-slate-500 mb-1">CUSIP</p>
+                            <p className="font-semibold text-slate-900 dark:text-slate-900 font-mono text-sm">{instrument.cusip}</p>
+                          </div>
+                        )}
+                        {instrument.isin && (
+                          <div>
+                            <p className="text-sm text-slate-500 mb-1">ISIN</p>
+                            <p className="font-semibold text-slate-900 dark:text-slate-900 font-mono text-sm">{instrument.isin}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
+                  {(instrument.distributionMechanics || instrument.settlementNotes) && (
+                    <div className="grid grid-cols-1 gap-4 mb-6 pt-4 border-t border-slate-200 dark:border-slate-300">
+                      {instrument.distributionMechanics && (
+                        <div>
+                          <p className="text-sm text-slate-500 mb-1">Distribution mechanics</p>
+                          <p className="text-sm text-slate-700 dark:text-slate-700">{instrument.distributionMechanics}</p>
+                        </div>
+                      )}
+                      {instrument.settlementNotes && (
+                        <div>
+                          <p className="text-sm text-slate-500 mb-1">Settlement notes</p>
+                          <p className="text-sm text-slate-700 dark:text-slate-700">{instrument.settlementNotes}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <h4 className="text-lg font-bold text-slate-900 dark:text-slate-900 mb-4">Yield / cost</h4>
                   <div className="flex flex-wrap items-baseline gap-4 mb-4">
                     <p className="text-2xl font-extrabold text-[#f49d1d]">{formatApy(instrument)}</p>
                     {instrument.module === "M1A" && <span className="text-sm text-slate-500">(borrow cost)</span>}
                   </div>
-                  {asOf && <p className="text-sm text-slate-500 mb-4">As of {new Date(asOf).toLocaleString()}</p>}
+                  {asOf && (
+                    <p className="text-sm text-slate-500 mb-4">
+                      Rates as of {new Date(asOf).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
+                      {instrument.latestSnapshot?.rateType && (
+                        <span className="ml-2 text-slate-600 dark:text-slate-600">· {instrument.latestSnapshot.rateType}</span>
+                      )}
+                    </p>
+                  )}
 
                   {instrument.notes && (
                     <div className="pt-6 border-t border-slate-200 dark:border-slate-300">

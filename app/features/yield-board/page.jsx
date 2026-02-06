@@ -30,6 +30,7 @@ import {
   DollarSign,
   CircleDollarSign,
   Info,
+  RefreshCw,
 } from "lucide-react"
 
 const PER_PAGE = 10
@@ -42,9 +43,11 @@ const COLUMNS_CONFIG = [
   { id: "collateral", label: "Collateral", defaultVisible: false, sortable: true, icon: Shield },
   { id: "seniority", label: "Seniority", defaultVisible: false, sortable: true, icon: Award },
   { id: "lockup", label: "Lockup", defaultVisible: false, sortable: true, icon: Clock },
+  { id: "paymentFreq", label: "Payment", defaultVisible: false, sortable: true, icon: Calendar },
   { id: "jurisdiction", label: "Jurisdiction", defaultVisible: false, sortable: true, icon: MapPin },
-  { id: "apy", label: "APY", defaultVisible: false, sortable: true, icon: Percent },
-  { id: "asOf", label: "Date", defaultVisible: false, sortable: true, icon: Calendar },
+  { id: "apy", label: "APY", defaultVisible: true, sortable: true, icon: Percent },
+  { id: "rateType", label: "Rate type", defaultVisible: false, sortable: true, icon: FileText },
+  { id: "asOf", label: "As of", defaultVisible: true, sortable: true, icon: Calendar },
   { id: "notes", label: "Notes", defaultVisible: false, sortable: true, icon: FileText },
   { id: "detail", label: "Detail", alwaysVisible: true, sortable: false, icon: Eye },
 ]
@@ -60,10 +63,13 @@ function formatApy(instrument) {
   const s = instrument?.latestSnapshot
   if (!s) return instrument?.apyLabel ?? "—"
   if (s.apyLabelOverride) return s.apyLabelOverride
-  if (s.apyMin != null && s.apyMax != null && s.apyMin !== s.apyMax)
-    return `${s.apyMin}% – ${s.apyMax}%`
-  if (s.apyMin != null) return `${s.apyMin}%`
-  if (s.apyMax != null) return `${s.apyMax}%`
+  const min = s.apyMin != null ? Number(s.apyMin) : null
+  const max = s.apyMax != null ? Number(s.apyMax) : null
+  if (min == null && max == null) return instrument?.apyLabel ?? "—"
+  if (min === 0 && max === 0) return "—"
+  if (min != null && max != null && min !== max) return `${min}% – ${max}%`
+  if (min != null) return `${min}%`
+  if (max != null) return `${max}%`
   return instrument?.apyLabel ?? "—"
 }
 
@@ -94,6 +100,10 @@ function getSortValue(item, key) {
       const v = s?.apyMin != null ? Number(s.apyMin) : s?.apyMax != null ? Number(s.apyMax) : null
       return v ?? -Infinity
     }
+    case "rateType":
+      return (item?.latestSnapshot?.rateType ?? "").toLowerCase()
+    case "paymentFreq":
+      return (item?.paymentFrequency ?? "").toLowerCase()
     case "asOf": {
       const d = item?.latestSnapshot?.asOf
       return d ? new Date(d).getTime() : -Infinity
@@ -236,6 +246,9 @@ export default function YieldBoardPage() {
         <p className="text-sm md:text-base text-slate-600 dark:text-slate-300 max-w-3xl mt-6 leading-relaxed px-4">
           DCC database instruments: 1A (BTC), 1B (fiat), 1C (stablecoin). Risk, structure and liquidity first; yield conditional, non‑promotional.
         </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl mt-2 px-4">
+          Data from Yield Board DB. Run <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">npm run sync:instruments</code> to pull latest M1C rates from DefiLlama. {!loading && <span className="font-medium">{instruments.length} instruments</span>} loaded.
+        </p>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pb-16 space-y-6">
@@ -243,9 +256,20 @@ export default function YieldBoardPage() {
           className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
           style={cardStyle}
         >
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">
-            Filters
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-900">
+              Filters
+            </h3>
+            <button
+              type="button"
+              onClick={() => fetchInstruments()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+              Refresh instruments
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label htmlFor="module" className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
@@ -299,14 +323,21 @@ export default function YieldBoardPage() {
               <label htmlFor="jurisdiction" className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
                 Jurisdiction
               </label>
-              <input
-                type="text"
+              <select
                 id="jurisdiction"
                 value={jurisdiction}
                 onChange={(e) => setJurisdiction(e.target.value)}
-                placeholder="e.g. UAE, US"
                 className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-              />
+              >
+                <option value="">All</option>
+                <option value="UAE">UAE</option>
+                <option value="US">US</option>
+                <option value="EU">EU</option>
+                <option value="UK">UK</option>
+                <option value="DeFi">DeFi</option>
+                <option value="Global">Global</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <div>
               <label htmlFor="supportedAsset" className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
@@ -519,6 +550,12 @@ export default function YieldBoardPage() {
                                       {item.lockup}
                                     </span>
                                   )}
+                                  {c.id === "paymentFreq" && (
+                                    <span className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-700">
+                                      <Calendar size={14} className="text-slate-500 flex-shrink-0" />
+                                      {item.paymentFrequency || "—"}
+                                    </span>
+                                  )}
                                   {c.id === "jurisdiction" && (
                                     <span className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-700">
                                       <MapPin size={14} className="text-slate-500 flex-shrink-0" />
@@ -526,16 +563,21 @@ export default function YieldBoardPage() {
                                     </span>
                                   )}
                                   {c.id === "apy" && (
-                                    <span className="inline-flex items-center gap-2 text-sm font-normal text-[#f49d1d]">
+                                    <span className="inline-flex items-center gap-2 text-sm font-normal text-[#f49d1d] tabular-nums">
                                       <Percent size={14} className="flex-shrink-0" />
                                       {formatApy(item)}
                                       {item.module === "M1A" ? " (cost)" : ""}
                                     </span>
                                   )}
+                                  {c.id === "rateType" && (
+                                    <span className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-600">
+                                      {item.latestSnapshot?.rateType ?? "—"}
+                                    </span>
+                                  )}
                                   {c.id === "asOf" && (
-                                    <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                    <span className="inline-flex items-center gap-2 text-xs text-slate-500 tabular-nums">
                                       <Calendar size={12} className="text-slate-500 flex-shrink-0" />
-                                      {asOf ? new Date(asOf).toLocaleDateString("en-US") : "—"}
+                                      {asOf ? new Date(asOf).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—"}
                                     </span>
                                   )}
                                   {c.id === "notes" && (
@@ -592,7 +634,7 @@ export default function YieldBoardPage() {
             </>
           ) : (
             <div className="py-12 text-center text-slate-600 dark:text-slate-400">
-              No instruments. Adjust filters or run the DCC seed.
+              No instruments. Adjust filters, run the DCC seed, or <code className="bg-slate-100 dark:bg-slate-700 px-1 rounded">npm run sync:instruments</code> for M1C (DefiLlama).
             </div>
           )}
         </div>

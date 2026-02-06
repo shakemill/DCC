@@ -9,6 +9,7 @@
     "dev": "next dev --turbopack",
     "dev:webpack": "next dev",
     "build": "next build",
+    "postbuild": "node -e \"const fs=require('fs');const p='.next/standalone';if(fs.existsSync(p)){const c=(a,b)=>fs.cpSync(a,b,{recursive:true});c('public',p+'/public');c('.next/static',p+'/.next/static');}\"",
     "start": "next start",
     "lint": "next lint",
     "test:db": "node test-connection-simple.js",
@@ -18,7 +19,8 @@
     "db:seed": "prisma db seed",
     "db:migrate:seed": "npm run db:migrate && npm run db:seed",
     "db:push:seed": "npm run db:push && npm run db:seed",
-    "db:export": "node scripts/export-db.js"
+    "db:export": "node scripts/export-db.js",
+    "sync:instruments": "node scripts/sync-instruments-from-api.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
@@ -29,6 +31,7 @@
     "mysql2": "^3.16.1",
     "next": "16.0.10",
     "nodemailer": "^7.0.12",
+    "openai": "^4.104.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
     "react-fast-marquee": "^1.6.5"
@@ -40,5 +43,6 @@
     "eslint-config-next": "16.0.7",
     "prisma": "^6.19.2",
     "tailwindcss": "^4"
-  }
+  },
+  "packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316"
 }

@@ -29,6 +29,8 @@ pnpm dev
 bun dev
 ```
 
+Admin can fill the **Crypto Lending Providers** table via the "Load top 20 from ChatGPT" button (requires `OPENAI_API_KEY` in `.env`).
+
 ## Author 
 ```
 Design and code is completely written by PrebuiltUI and development team. 

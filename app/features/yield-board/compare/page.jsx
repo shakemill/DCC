@@ -21,9 +21,13 @@ function formatApy(instrument) {
   const s = instrument?.latestSnapshot
   if (!s) return instrument?.apyLabel ?? "—"
   if (s.apyLabelOverride) return s.apyLabelOverride
-  if (s.apyMin != null && s.apyMax != null && s.apyMin !== s.apyMax) return `${s.apyMin}% – ${s.apyMax}%`
-  if (s.apyMin != null) return `${s.apyMin}%`
-  if (s.apyMax != null) return `${s.apyMax}%`
+  const min = s.apyMin != null ? Number(s.apyMin) : null
+  const max = s.apyMax != null ? Number(s.apyMax) : null
+  if (min == null && max == null) return instrument?.apyLabel ?? "—"
+  if (min === 0 && max === 0) return "—"
+  if (min != null && max != null && min !== max) return `${min}% – ${max}%`
+  if (min != null) return `${min}%`
+  if (max != null) return `${max}%`
   return instrument?.apyLabel ?? "—"
 }
 

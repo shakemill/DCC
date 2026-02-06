@@ -1,10 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { Save, Clock, Eye, Trash2, ChevronDown, ChevronUp, AlertTriangle, X, Coins, DollarSign, CircleDollarSign, Info } from "lucide-react";
+import { Save, Clock, Eye, Trash2, ChevronDown, ChevronUp, AlertTriangle, X, Coins, DollarSign, CircleDollarSign, Info, RefreshCw, LayoutList, Calendar, CalendarDays, Award, TrendingUp, Wallet, Percent, Trophy, Activity, Droplets } from "lucide-react";
 import ProtectedFeature from "@/components/ProtectedFeature";
 import Breadcrumb from "@/components/Breadcrumb";
-
 export default function IncomePlannersPage() {
     const { user } = useAuth();
     const [formData, setFormData] = useState({
@@ -25,32 +24,35 @@ export default function IncomePlannersPage() {
     // BTC Income Planner state
     const [btcPlanner, setBtcPlanner] = useState({
         totalNeed12m: "",
-        apr: "9",
-        principal: "",
         btcPrice: "40000",
         ltv: 50,
         marginCallLtv: 75,
         liquidationLtv: 85,
     });
     const [hoveredLtv, setHoveredLtv] = useState(null);
+    const [btcPlannerSaves, setBtcPlannerSaves] = useState([]);
+    const [btcSaveMessage, setBtcSaveMessage] = useState("");
+    const [btcDeleteConfirmId, setBtcDeleteConfirmId] = useState(null);
+    const [btcPriceLoading, setBtcPriceLoading] = useState(false);
 
-    // Fiat Income Planner state
+    // Fiat Income Planner state (only Capital, Duration, Allocation mode are user inputs)
     const [fiatPlanner, setFiatPlanner] = useState({
-        targetMonthlyIncome: "",
-        targetAnnualIncome: "",
+        capital: 100000,
+        durationMonths: 12,
         horizon: 12,
-        region: "UAE",
+        region: "US",
         liquidityPreference: "Market-traded",
         mode: "Guided",
         riskPosture: "Balanced",
-        minLiquidity: "",
         excludeDiscretionary: false,
-        availableCapital: "",
     });
     const [fiatInstruments, setFiatInstruments] = useState([]);
     const [fiatInstrumentsLoading, setFiatInstrumentsLoading] = useState(false);
     const [fiatWarnings, setFiatWarnings] = useState([]);
-    const [redRiskAcknowledged, setRedRiskAcknowledged] = useState(false);
+    const [fiatPlannerSaves, setFiatPlannerSaves] = useState([]);
+    const [fiatSaveMessage, setFiatSaveMessage] = useState("");
+    const [fiatDeleteConfirmId, setFiatDeleteConfirmId] = useState(null);
+    const [fiatProviderRanking, setFiatProviderRanking] = useState(null);
 
     // Stablecoin Income Planner state
     const [stablecoinPlanner, setStablecoinPlanner] = useState({
@@ -60,11 +62,12 @@ export default function IncomePlannersPage() {
         liquidityPreference: "On-demand",
         mode: "Guided",
         targetMonthlyIncome: "",
-        principal: "",
     });
     const [stablecoinInstruments, setStablecoinInstruments] = useState([]);
     const [stablecoinInstrumentsLoading, setStablecoinInstrumentsLoading] = useState(false);
-    const [stablecoinRedRiskAcknowledged, setStablecoinRedRiskAcknowledged] = useState(false);
+    const [stablecoinPlannerSaves, setStablecoinPlannerSaves] = useState([]);
+    const [stablecoinSaveMessage, setStablecoinSaveMessage] = useState("");
+    const [stablecoinDeleteConfirmId, setStablecoinDeleteConfirmId] = useState(null);
 
     // Bitcoin price (you can fetch this from an API later)
     const bitcoinPrice = 40000; // Default price, can be updated with API
@@ -114,7 +117,7 @@ export default function IncomePlannersPage() {
         if (fiatPlanner.mode === "Guided" && activeTab === "fiat" && !fiatInstrumentsLoading) {
             applyGuidedAllocation();
         }
-    }, [fiatPlanner.mode, fiatPlanner.region, fiatPlanner.excludeDiscretionary, activeTab, fiatInstrumentsLoading]);
+    }, [fiatPlanner.mode, fiatPlanner.region, fiatPlanner.excludeDiscretionary, fiatPlanner.durationMonths, activeTab, fiatInstrumentsLoading]);
 
     // Apply stablecoin guided allocation when mode changes to Guided or when stablecoin instruments load.
     // Do not include stablecoinInstruments in deps: it would retrigger after setState → infinite loop.
@@ -124,43 +127,44 @@ export default function IncomePlannersPage() {
         }
     }, [stablecoinPlanner.mode, stablecoinPlanner.stablecoinAsset, stablecoinPlanner.region, activeTab, stablecoinInstrumentsLoading]);
 
-    // Fetch 1B instruments (fiat) from API
+    // Fiat Income Planner: fetch from Crypto Lending Providers database
     useEffect(() => {
         if (activeTab !== "fiat") return;
         let cancelled = false;
         setFiatInstrumentsLoading(true);
-        fetch("/api/instruments?module=1B")
+        fetch("/api/crypto-lending-providers")
             .then((res) => res.json())
             .then((data) => {
-                if (cancelled || !data.success || !Array.isArray(data.instruments)) return;
-                const regionFromJurisdiction = (j) => {
-                    if (!j) return [];
-                    return j.split(/\s*\/\s*/).map((s) => s.trim()).filter(Boolean);
-                };
-                const mapped = (data.instruments || []).map((i) => {
-                    const snap = i.latestSnapshot || {};
-                    const region = Array.isArray(i.regionEligibility) && i.regionEligibility.length
-                        ? i.regionEligibility
-                        : regionFromJurisdiction(i.jurisdiction);
+                if (cancelled || !data.success || !Array.isArray(data.providers)) return;
+                const mapped = (data.providers || []).map((p) => {
+                    const apyMinPct = p.apyMin != null ? Number(p.apyMin) : null;
+                    const apyMaxPct = p.apyMax != null ? Number(p.apyMax) : null;
+                    const liq = (p.liquidity || "high").toString().toLowerCase();
                     return {
-                        id: i.id,
-                        issuer: i.issuer,
-                        name: i.productName,
-                        type: i.seniority || "—",
-                        rateType: snap.rateType || i.apyLabel || "Variable",
-                        apyMin: snap.apyMin != null ? Number(snap.apyMin) : null,
-                        apyMax: snap.apyMax != null ? Number(snap.apyMax) : null,
-                        paymentFreq: i.paymentFrequency || "—",
-                        liquidity: i.lockup === "Market" ? "Market-traded" : (i.lockup || "—"),
-                        seniority: i.seniority,
-                        region: region.length ? region : ["Global"],
-                        rateAsOf: (snap.asOf || new Date()).toString(),
+                        id: p.id,
+                        name: p.provider || "—",
+                        type: p.type || "—",
+                        jurisdiction: p.jurisdiction != null ? String(p.jurisdiction).trim() || null : null,
+                        apyMinPct,
+                        apyMaxPct,
+                        apyMin: apyMinPct != null ? apyMinPct / 100 : null,
+                        apyMax: apyMaxPct != null ? apyMaxPct / 100 : null,
+                        hv30Pct: p.hv30Pct != null ? Number(p.hv30Pct) : null,
+                        hv30: p.hv30Pct != null ? Number(p.hv30Pct) / 100 : 0.01,
+                        liquidityType: liq,
+                        liquidity: p.liquidity || "—",
+                        comment: p.comment || "",
+                        issuer: "—",
+                        rateType: "variable",
+                        seniority: "—",
+                        region: ["Global"],
+                        paymentFreq: "—",
                         selected: false,
                         weight: 0,
                     };
                 });
                 setFiatInstruments((prev) => {
-                    const byId = new Map(prev.map((p) => [p.id, p]));
+                    const byId = new Map(prev.map((item) => [item.id, item]));
                     return mapped.map((m) => {
                         const old = byId.get(m.id);
                         return old ? { ...m, selected: old.selected, weight: old.weight } : m;
@@ -171,6 +175,43 @@ export default function IncomePlannersPage() {
             .finally(() => { if (!cancelled) setFiatInstrumentsLoading(false); });
         return () => { cancelled = true; };
     }, [activeTab]);
+
+    const FIAT_PLANNER_STORAGE_KEY = "dcc_fiat_planner_saves";
+    const BTC_PLANNER_STORAGE_KEY = "dcc_btc_planner_saves";
+    const STABLECOIN_PLANNER_STORAGE_KEY = "dcc_stablecoin_planner_saves";
+    useEffect(() => {
+        try {
+            const raw = typeof window !== "undefined" ? localStorage.getItem(FIAT_PLANNER_STORAGE_KEY) : null;
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                setFiatPlannerSaves(Array.isArray(parsed) ? parsed : []);
+            }
+        } catch (_) {
+            setFiatPlannerSaves([]);
+        }
+    }, []);
+    useEffect(() => {
+        try {
+            const raw = typeof window !== "undefined" ? localStorage.getItem(BTC_PLANNER_STORAGE_KEY) : null;
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                setBtcPlannerSaves(Array.isArray(parsed) ? parsed : []);
+            }
+        } catch (_) {
+            setBtcPlannerSaves([]);
+        }
+    }, []);
+    useEffect(() => {
+        try {
+            const raw = typeof window !== "undefined" ? localStorage.getItem(STABLECOIN_PLANNER_STORAGE_KEY) : null;
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                setStablecoinPlannerSaves(Array.isArray(parsed) ? parsed : []);
+            }
+        } catch (_) {
+            setStablecoinPlannerSaves([]);
+        }
+    }, []);
 
     // Fetch 1C instruments (stablecoin) from API
     useEffect(() => {
@@ -227,6 +268,7 @@ export default function IncomePlannersPage() {
     }, [activeTab]);
 
     const fetchBtcPrice = async () => {
+        setBtcPriceLoading(true);
         try {
             const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
             if (!response.ok) {
@@ -244,6 +286,8 @@ export default function IncomePlannersPage() {
                 console.warn("Error fetching BTC price from CoinGecko:", error.message);
             }
             // Keep default value if fetch fails
+        } finally {
+            setBtcPriceLoading(false);
         }
     };
 
@@ -498,8 +542,6 @@ export default function IncomePlannersPage() {
     // BTC Income Planner calculations
     const calculateBtcPlanner = () => {
         const totalNeed12m = parseFloat(btcPlanner.totalNeed12m) || 0;
-        const apr = parseFloat(btcPlanner.apr) / 100 || 0;
-        const principal = parseFloat(btcPlanner.principal) || 0;
         const btcPrice = parseFloat(btcPlanner.btcPrice) || 40000;
         const ltv = btcPlanner.ltv / 100;
         const marginCallLtv = btcPlanner.marginCallLtv / 100;
@@ -509,7 +551,6 @@ export default function IncomePlannersPage() {
 
         // Monthly targets
         const targetedMonthlyIncome = totalNeed12m / 12;
-        const monthlyInterestPayment = principal > 0 ? (principal * apr) / 12 : 0;
 
         // BTC required at current LTV
         const btcRequired = totalNeed12m / (btcPrice * ltv);
@@ -543,7 +584,6 @@ export default function IncomePlannersPage() {
 
         return {
             targetedMonthlyIncome,
-            monthlyInterestPayment,
             btcRequired,
             marginCallPrice,
             liquidationPrice,
@@ -563,35 +603,47 @@ export default function IncomePlannersPage() {
         }));
     };
 
-    // Fiat Income Planner calculations
+    // Fiat Income Planner calculations (Capital, Duration, Allocation only)
     const calculateFiatPlanner = () => {
-        const targetMonthly = parseFloat(fiatPlanner.targetMonthlyIncome) || 0;
-        const targetAnnual = parseFloat(fiatPlanner.targetAnnualIncome) || 0;
-        const targetAnnualIncome = targetAnnual > 0 ? targetAnnual : targetMonthly * 12;
-        const horizon = fiatPlanner.horizon || 12;
-
-        if (targetAnnualIncome <= 0) return null;
-
-        // Get selected instruments
         const selected = fiatInstruments.filter(instr => instr.selected);
         const totalWeight = selected.reduce((sum, instr) => sum + (instr.weight || 0), 0);
 
         if (selected.length === 0 || totalWeight !== 100) return null;
 
-        // Calculate portfolio APY range
-        const portfolioApyMin = selected.reduce((sum, instr) => 
-            sum + ((instr.weight / 100) * (instr.apyMin || 0)), 0);
-        const portfolioApyMax = selected.reduce((sum, instr) => 
-            sum + ((instr.weight / 100) * (instr.apyMax || 0)), 0);
+        // Portfolio APY range: same as spec — (weight/100)×APY per instrument, then sum
+        // Example: 0.50×6% + 0.30×8% + 0.20×8% = 7.0%; 0.50×8% + 0.30×8% + 0.20×14% = 9.2%
+        const pctMin = (instr) => (instr.apyMinPct != null ? Number(instr.apyMinPct) : (instr.apyMin != null ? Number(instr.apyMin) * 100 : 0));
+        const pctMax = (instr) => (instr.apyMaxPct != null ? Number(instr.apyMaxPct) : (instr.apyMax != null ? Number(instr.apyMax) * 100 : 0));
+        const portfolioApyMin = Math.round(selected.reduce((sum, instr) => sum + (Number(instr.weight) / 100) * pctMin(instr), 0) * 100) / 100;
+        const portfolioApyMax = Math.round(selected.reduce((sum, instr) => sum + (Number(instr.weight) / 100) * pctMax(instr), 0) * 100) / 100;
 
-        // Calculate required capital
-        const requiredCapitalMin = targetAnnualIncome / (portfolioApyMin / 100);
-        const requiredCapitalMax = targetAnnualIncome / (portfolioApyMax / 100);
+        const capital = Number(fiatPlanner.capital) || 0;
+        // Annual income = capital × (APY% / 100); monthly = annual / 12
+        const expectedIncomeMin = capital > 0 ? Math.round((capital * portfolioApyMin / 100) * 100) / 100 : null;
+        const expectedIncomeMax = capital > 0 ? Math.round((capital * portfolioApyMax / 100) * 100) / 100 : null;
+        const requiredCapitalMin = null;
+        const requiredCapitalMax = null;
+        const targetAnnualIncome = null;
+        const targetMonthlyIncome = null;
 
-        // Calculate expected income if capital provided
-        const availableCapital = parseFloat(fiatPlanner.availableCapital) || 0;
-        const expectedIncomeMin = availableCapital > 0 ? (availableCapital * portfolioApyMin / 100) : null;
-        const expectedIncomeMax = availableCapital > 0 ? (availableCapital * portfolioApyMax / 100) : null;
+        // Stability Score (0–100): weighted by volatility (HV30), rate type, seniority
+        const volScore = (hv30) => {
+            const h = Number(hv30) ?? 0.2;
+            if (h < 0.1) return 90;
+            if (h < 0.2) return 75;
+            if (h < 0.35) return 55;
+            return 30;
+        };
+        const rateScore = (rateType) => ((rateType || "").toString().toLowerCase() === "fixed" ? 85 : 65);
+        const seniorityScore = (s) => ((s || "").toString().toLowerCase().includes("preferred") ? 60 : 45);
+        const weightSum = selected.reduce((s, i) => s + (i.weight || 0), 0) || 1;
+        const stabilityScore = Math.round(Math.min(100, Math.max(0,
+            selected.reduce((s, i) => {
+                const w = (i.weight || 0) / weightSum;
+                return s + w * (0.4 * volScore(i.hv30) + 0.35 * rateScore(i.rateType) + 0.25 * seniorityScore(i.seniority));
+            }, 0)
+        )));
+        const stabilityBadge = stabilityScore >= 75 ? "Low" : stabilityScore >= 55 ? "Moderate" : stabilityScore >= 40 ? "Variable" : "High";
 
         // Generate warnings
         const warnings = [];
@@ -628,10 +680,34 @@ export default function IncomePlannersPage() {
 
         // Eligibility
         selected.forEach(instr => {
-            if (!instr.region.includes(fiatPlanner.region)) {
+            const eligibleInRegion = instr.region?.includes(fiatPlanner.region) || instr.region?.includes("Global");
+            if (!eligibleInRegion) {
                 warnings.push({ type: "eligibility", severity: "red", message: `${instr.name}: not available in ${fiatPlanner.region}` });
             }
         });
+
+        // Risk notes: high volatility allocation (HV30; hv30 is stored as decimal e.g. 0.07 = 7%)
+        const hv30Pct = (instr) => (instr.hv30 != null ? Number(instr.hv30) * 100 : 0);
+        selected.forEach(instr => {
+            const pct = hv30Pct(instr);
+            const w = instr.weight || 0;
+            if (pct >= 25 && w >= 15) {
+                warnings.push({ type: "volatility", severity: "amber", message: `${w.toFixed(0)}% allocation to ${instr.name} has higher market volatility (HV30 ~${pct.toFixed(0)}%).` });
+            }
+        });
+
+        // Risk notes: variable / option-like distributions
+        selected.forEach(instr => {
+            const isVariable = (instr.rateType || "").toString().toLowerCase() === "variable";
+            const name = instr.name || "";
+            const looksLikeOption = /YBTC|BTC|option|covered.?call/i.test(name);
+            if (isVariable && looksLikeOption) {
+                warnings.push({ type: "variable", severity: "amber", message: `${instr.name}: distributions vary due to option premiums; upside may be capped in strong rallies.` });
+            }
+        });
+
+        // Generic risk note
+        warnings.push({ type: "mechanics", severity: "amber", message: "All payouts depend on issuer/fund mechanics; not guaranteed." });
 
         const hasRedWarnings = warnings.some(w => w.severity === "red");
 
@@ -644,13 +720,15 @@ export default function IncomePlannersPage() {
 
         return {
             targetAnnualIncome,
-            targetMonthlyIncome: targetAnnualIncome / 12,
+            targetMonthlyIncome: targetAnnualIncome != null ? targetAnnualIncome / 12 : null,
             portfolioApyMin,
             portfolioApyMax,
             requiredCapitalMin,
             requiredCapitalMax,
             expectedIncomeMin,
             expectedIncomeMax,
+            stabilityScore,
+            stabilityBadge,
             warnings,
             hasRedWarnings,
             selected,
@@ -661,17 +739,7 @@ export default function IncomePlannersPage() {
     const fiatResults = calculateFiatPlanner();
 
     const handleFiatPlannerChange = (field, value) => {
-        setFiatPlanner(prev => ({
-            ...prev,
-            [field]: value
-        }));
-        // Clear annual if monthly is set and vice versa
-        if (field === "targetMonthlyIncome" && value) {
-            setFiatPlanner(prev => ({ ...prev, targetAnnualIncome: "" }));
-        }
-        if (field === "targetAnnualIncome" && value) {
-            setFiatPlanner(prev => ({ ...prev, targetMonthlyIncome: "" }));
-        }
+        setFiatPlanner(prev => ({ ...prev, [field]: value }));
     };
 
     const handleInstrumentToggle = (id) => {
@@ -688,35 +756,264 @@ export default function IncomePlannersPage() {
         ));
     };
 
+    // Fiat scoring: duration_factor from Duration (months), liquidity_type factor, score_brut, final_score
+    function getDurationFactor(durationMonths) {
+        const m = durationMonths != null ? Number(durationMonths) : 12;
+        if (m <= 12) return 1;
+        if (m < 36) return 1.2;
+        return 1.5;
+    }
+    function getLiquidityFactor(liquidityType) {
+        const t = (liquidityType || "high").toString().toLowerCase();
+        if (t === "medium") return 1.1;
+        if (t === "locked") return 1.3;
+        return 1;
+    }
+    function computeFiatScores(providers, durationMonths) {
+        const duration_factor = getDurationFactor(durationMonths);
+        return providers
+            .map((p) => {
+                const hvRaw = p.hv30Pct != null ? Number(p.hv30Pct) : 0;
+                // Disqualify providers with HV30 = 0 (or missing)
+                if (!hvRaw || hvRaw <= 0) return null;
+
+                const apyMin = p.apyMinPct != null ? Number(p.apyMinPct) : 0;
+                const apyMax = p.apyMaxPct != null ? Number(p.apyMaxPct) : apyMin;
+                const apy_avg = (apyMin + apyMax) / 2;
+                const hv30Pct = hvRaw;
+                const score_brut = apy_avg / hv30Pct;
+                const score_after_duration = score_brut / duration_factor;
+                const liquidity_factor = getLiquidityFactor(p.liquidityType || p.liquidity);
+                const final_score = score_after_duration / liquidity_factor;
+                return {
+                    id: p.id,
+                    name: p.name,
+                    type: p.type,
+                    jurisdiction: p.jurisdiction != null ? String(p.jurisdiction).trim() || null : null,
+                    apyMinPct: apyMin,
+                    apyMaxPct: apyMax,
+                    apy_avg,
+                    hv30Pct,
+                    liquidity: (p.liquidityType || p.liquidity || "high").toString(),
+                    score_brut,
+                    score_after_duration,
+                    final_score,
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.final_score - a.final_score);
+    }
+
     const applyGuidedAllocation = () => {
-        // Simple guided allocation - can be enhanced
-        const eligible = fiatInstruments.filter(instr => 
-            instr.region.includes(fiatPlanner.region) &&
-            (!fiatPlanner.excludeDiscretionary || instr.rateType !== "Discretionary")
+        if (fiatInstruments.length === 0) {
+            setFiatProviderRanking(null);
+            return;
+        }
+        const ranked = computeFiatScores(fiatInstruments, fiatPlanner.durationMonths);
+        const top5 = ranked.slice(0, 5);
+        const top3 = ranked.slice(0, 3);
+        const totalScore = top3.reduce((s, r) => s + r.final_score, 0);
+        const cap = 40;
+        let weights = totalScore > 0 ? top3.map((r) => (r.final_score / totalScore) * 100) : top3.map(() => 100 / 3);
+        weights = weights.map((w) => Math.min(w, cap));
+        const sum = weights.reduce((s, w) => s + w, 0);
+        const normalized = sum > 0 ? weights.map((w) => (w / sum) * 100) : weights.map(() => 100 / 3);
+        const allocation = top3.map((r, i) => ({ ...r, weight: Math.round(normalized[i] * 10) / 10 }));
+        let allocSum = allocation.reduce((s, a) => s + a.weight, 0);
+        if (allocSum !== 100 && allocation.length > 0) allocation[0].weight = Math.round((allocation[0].weight + (100 - allocSum)) * 10) / 10;
+        setFiatProviderRanking({ ranked, top5, allocation });
+
+        const allocationById = new Map(allocation.map((a) => [a.id, a]));
+        setFiatInstruments((prev) =>
+            prev.map((instr) => {
+                const a = allocationById.get(instr.id);
+                if (!a) return { ...instr, selected: false, weight: 0 };
+                return { ...instr, selected: true, weight: a.weight };
+            })
         );
-        
-        if (eligible.length === 0) return;
-
-        const weights = eligible.length === 1 ? [100] : 
-                       eligible.length === 2 ? [50, 50] : 
-                       [50, 25, 25];
-
-        setFiatInstruments(prev => prev.map((instr, idx) => {
-            const eligibleIdx = eligible.findIndex(e => e.id === instr.id);
-            if (eligibleIdx >= 0) {
-                return { ...instr, selected: true, weight: weights[eligibleIdx] || 0 };
-            }
-            return { ...instr, selected: false, weight: 0 };
-        }));
     };
 
-    // Stablecoin Income Planner calculations
+    const fiatScoredRanking = useMemo(
+        () => computeFiatScores(fiatInstruments, fiatPlanner.durationMonths),
+        [fiatInstruments, fiatPlanner.durationMonths]
+    );
+    const fiatTop5 = fiatScoredRanking.slice(0, 5);
+    const capitalForRevenue = Number(fiatPlanner.capital) || 0;
+
+    const persistFiatPlannerSaves = (list) => {
+        setFiatPlannerSaves(list);
+        try {
+            if (typeof window !== "undefined") {
+                localStorage.setItem(FIAT_PLANNER_STORAGE_KEY, JSON.stringify(list));
+            }
+        } catch (_) {}
+    };
+
+    const saveFiatPlannerOutput = () => {
+        if (!fiatResults) {
+            setFiatSaveMessage("Fill in the fields and select instruments (100% weight) to get results.");
+            setTimeout(() => setFiatSaveMessage(""), 3000);
+            return;
+        }
+        const createdAt = new Date().toISOString();
+        const save = {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `fiat-${Date.now()}`,
+            createdAt,
+            inputs: {
+                capital: fiatPlanner.capital,
+                durationMonths: fiatPlanner.durationMonths,
+                mode: fiatPlanner.mode,
+            },
+            instruments: fiatInstruments.map((i) => ({ id: i.id, selected: i.selected, weight: i.weight ?? 0 })),
+            outputs: {
+                portfolioApyMin: fiatResults.portfolioApyMin,
+                portfolioApyMax: fiatResults.portfolioApyMax,
+                expectedIncomeMin: fiatResults.expectedIncomeMin,
+                expectedIncomeMax: fiatResults.expectedIncomeMax,
+                stabilityScore: fiatResults.stabilityScore,
+                stabilityBadge: fiatResults.stabilityBadge,
+                rateAsOf: fiatResults.rateAsOf,
+            },
+        };
+        setFiatPlannerSaves((prev) => {
+            const next = [save, ...prev].slice(0, 20);
+            try {
+                if (typeof window !== "undefined") {
+                    localStorage.setItem(FIAT_PLANNER_STORAGE_KEY, JSON.stringify(next));
+                }
+            } catch (_) {}
+            return next;
+        });
+        setFiatSaveMessage("Scenario saved.");
+        setTimeout(() => setFiatSaveMessage(""), 3000);
+    };
+
+    const recallFiatPlannerSave = (save) => {
+        if (!save?.inputs) return;
+        setFiatPlanner((prev) => ({ ...prev, ...save.inputs }));
+        if (save.instruments?.length) {
+            const byId = new Map(save.instruments.map((s) => [s.id, s]));
+            setFiatInstruments((prev) =>
+                prev.map((m) => {
+                    const s = byId.get(m.id);
+                    return s ? { ...m, selected: s.selected, weight: s.weight ?? 0 } : m;
+                })
+            );
+        }
+        setFiatSaveMessage("Scenario recalled.");
+        setTimeout(() => setFiatSaveMessage(""), 3000);
+    };
+
+    const deleteFiatPlannerSave = (id) => {
+        setFiatPlannerSaves((prev) => {
+            const next = prev.filter((s) => s.id !== id);
+            try {
+                if (typeof window !== "undefined") {
+                    localStorage.setItem(FIAT_PLANNER_STORAGE_KEY, JSON.stringify(next));
+                }
+            } catch (_) {}
+            return next;
+        });
+        setFiatDeleteConfirmId(null);
+    };
+
+    const persistBtcPlannerSaves = (list) => {
+        setBtcPlannerSaves(list);
+        try {
+            if (typeof window !== "undefined") {
+                localStorage.setItem(BTC_PLANNER_STORAGE_KEY, JSON.stringify(list));
+            }
+        } catch (_) {}
+    };
+    const saveBtcPlannerScenario = () => {
+        const createdAt = new Date().toISOString();
+        const save = {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `btc-${Date.now()}`,
+            createdAt,
+            inputs: { ...btcPlanner },
+            outputs: btcResults ? { targetedMonthlyIncome: btcResults.targetedMonthlyIncome, btcRequired: btcResults.btcRequired, marginCallPrice: btcResults.marginCallPrice, liquidationPrice: btcResults.liquidationPrice } : null,
+        };
+        const next = [save, ...btcPlannerSaves].slice(0, 20);
+        persistBtcPlannerSaves(next);
+        setBtcSaveMessage("Scenario saved.");
+        setTimeout(() => setBtcSaveMessage(""), 3000);
+    };
+    const recallBtcPlannerSave = (save) => {
+        if (!save?.inputs) return;
+        setBtcPlanner((prev) => ({ ...prev, ...save.inputs }));
+        setBtcSaveMessage("Scenario recalled.");
+        setTimeout(() => setBtcSaveMessage(""), 3000);
+    };
+    const deleteBtcPlannerSave = (id) => {
+        persistBtcPlannerSaves(btcPlannerSaves.filter((s) => s.id !== id));
+        setBtcDeleteConfirmId(null);
+    };
+
+    const persistStablecoinPlannerSaves = (list) => {
+        setStablecoinPlannerSaves(list);
+        try {
+            if (typeof window !== "undefined") {
+                localStorage.setItem(STABLECOIN_PLANNER_STORAGE_KEY, JSON.stringify(list));
+            }
+        } catch (_) {}
+    };
+    const saveStablecoinPlannerScenario = () => {
+        if (!stablecoinResults) {
+            setStablecoinSaveMessage("Fill in the fields and select instruments (100% weight) to save.");
+            setTimeout(() => setStablecoinSaveMessage(""), 3000);
+            return;
+        }
+        const createdAt = new Date().toISOString();
+        const save = {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stablecoin-${Date.now()}`,
+            createdAt,
+            inputs: {
+                stablecoinAsset: stablecoinPlanner.stablecoinAsset,
+                horizon: stablecoinPlanner.horizon,
+                region: stablecoinPlanner.region,
+                liquidityPreference: stablecoinPlanner.liquidityPreference,
+                mode: stablecoinPlanner.mode,
+                targetMonthlyIncome: stablecoinPlanner.targetMonthlyIncome,
+            },
+            instruments: stablecoinInstruments.map((i) => ({ id: i.id, selected: i.selected, weight: i.weight ?? 0 })),
+            outputs: {
+                monthlyIncomeMin: stablecoinResults.monthlyIncomeMin,
+                monthlyIncomeMax: stablecoinResults.monthlyIncomeMax,
+                totalIncomeMin: stablecoinResults.totalIncomeMin,
+                totalIncomeMax: stablecoinResults.totalIncomeMax,
+            },
+        };
+        const next = [save, ...stablecoinPlannerSaves].slice(0, 20);
+        persistStablecoinPlannerSaves(next);
+        setStablecoinSaveMessage("Scenario saved.");
+        setTimeout(() => setStablecoinSaveMessage(""), 3000);
+    };
+    const recallStablecoinPlannerSave = (save) => {
+        if (!save?.inputs) return;
+        setStablecoinPlanner((prev) => ({ ...prev, ...save.inputs }));
+        if (save.instruments?.length) {
+            const byId = new Map(save.instruments.map((s) => [s.id, s]));
+            setStablecoinInstruments((prev) =>
+                prev.map((m) => {
+                    const s = byId.get(m.id);
+                    return s ? { ...m, selected: s.selected, weight: s.weight ?? 0 } : m;
+                })
+            );
+        }
+        setStablecoinSaveMessage("Scenario recalled.");
+        setTimeout(() => setStablecoinSaveMessage(""), 3000);
+    };
+    const deleteStablecoinPlannerSave = (id) => {
+        persistStablecoinPlannerSaves(stablecoinPlannerSaves.filter((s) => s.id !== id));
+        setStablecoinDeleteConfirmId(null);
+    };
+
+    // Stablecoin Income Planner calculations (uses default principal for income projection)
+    const DEFAULT_STABLECOIN_PRINCIPAL = 100000;
     const calculateStablecoinPlanner = () => {
-        const principal = parseFloat(stablecoinPlanner.principal) || 0;
+        const principal = parseFloat(stablecoinPlanner.principal) || DEFAULT_STABLECOIN_PRINCIPAL;
         const horizon = stablecoinPlanner.horizon || 12;
         const targetMonthly = parseFloat(stablecoinPlanner.targetMonthlyIncome) || 0;
-
-        if (principal <= 0) return null;
 
         // Filter by stablecoin asset
         const filtered = stablecoinInstruments.filter(instr => 
@@ -987,37 +1284,23 @@ export default function IncomePlannersPage() {
                                         placeholder="13080"
                                         className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
                                     />
-                                    <p className="text-xs text-slate-500 mt-1">Principal + Total Interest</p>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Interest Rate (APR %)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={btcPlanner.apr}
-                                        onChange={(e) => handleBtcPlannerChange("apr", e.target.value)}
-                                        placeholder="9"
-                                        step="0.1"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Principal (USD) <span className="text-slate-400 font-normal">(optional)</span>
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={btcPlanner.principal}
-                                        onChange={(e) => handleBtcPlannerChange("principal", e.target.value)}
-                                        placeholder="12000"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        BTC Spot Price (USD)
-                                    </label>
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-700">
+                                            BTC Spot Price (USD)
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={fetchBtcPrice}
+                                            disabled={btcPriceLoading}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-1"
+                                            title="Reload price from CoinGecko"
+                                        >
+                                            <RefreshCw size={14} className={btcPriceLoading ? "animate-spin" : ""} />
+                                            {btcPriceLoading ? "..." : "Reload"}
+                                        </button>
+                                    </div>
                                     <input
                                         type="number"
                                         value={btcPlanner.btcPrice}
@@ -1087,14 +1370,6 @@ export default function IncomePlannersPage() {
                                                 {btcResults.btcRequired.toFixed(4)} ₿
                                             </p>
                                         </div>
-                                        {btcPlanner.principal > 0 && (
-                                            <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                                <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Monthly Interest Payment</p>
-                                                <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                    ${btcResults.monthlyInterestPayment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                </p>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
 
@@ -1219,6 +1494,66 @@ export default function IncomePlannersPage() {
                                 </div>
                             </>
                         )}
+
+                        {/* Save and recall scenario (BTC) */}
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-900 mb-3">Save and recall a scenario</h4>
+                            <div className="flex flex-wrap items-center gap-2 mb-4">
+                                <button
+                                    type="button"
+                                    onClick={saveBtcPlannerScenario}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-[#f49d1d] text-white hover:bg-[#d6891a] focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2"
+                                >
+                                    <Save size={16} />
+                                    Save
+                                </button>
+                                {btcSaveMessage && (
+                                    <span className="text-sm text-slate-600 dark:text-slate-600">{btcSaveMessage}</span>
+                                )}
+                            </div>
+                            {btcPlannerSaves.length > 0 && (
+                                <div>
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Saved scenarios</p>
+                                    <ul className="space-y-2">
+                                        {btcPlannerSaves.map((save) => {
+                                            const d = save.createdAt ? new Date(save.createdAt) : null;
+                                            const dateStr = d ? d.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                            const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "—";
+                                            const out = save.outputs;
+                                            const summaryStr = out
+                                                ? `LTV ${save.inputs?.ltv ?? "—"}% · ${out.btcRequired != null ? out.btcRequired.toFixed(4) + " ₿" : "—"} · Margin: $${out.marginCallPrice != null ? out.marginCallPrice.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}`
+                                                : (save.inputs?.totalNeed12m ? `Need 12m: $${Number(save.inputs.totalNeed12m).toLocaleString("en-US")}` : "—");
+                                            return (
+                                                <li key={save.id} className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg border border-slate-200 bg-slate-50/50 dark:bg-slate-50/50">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-xs text-slate-500 dark:text-slate-500">
+                                                            {dateStr} at {timeStr}
+                                                        </span>
+                                                        <span className="text-sm text-slate-700 dark:text-slate-700">{summaryStr}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {btcDeleteConfirmId === save.id ? (
+                                                            <>
+                                                                <span className="text-xs text-slate-600 dark:text-slate-600 mr-1">Delete?</span>
+                                                                <button type="button" onClick={() => setBtcDeleteConfirmId(null)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</button>
+                                                                <button type="button" onClick={() => deleteBtcPlannerSave(save.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-500">Delete</button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <button type="button" onClick={() => recallBtcPlannerSave(save)} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-[#f49d1d] text-[#f49d1d] hover:bg-[#f49d1d] hover:text-white focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2">Recall</button>
+                                                                <button type="button" onClick={() => setBtcDeleteConfirmId(save.id)} className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 rounded focus:ring-2 focus:ring-red-500" title="Delete"><Trash2 size={16} /></button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -1243,82 +1578,42 @@ export default function IncomePlannersPage() {
                         <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
                             style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
                         >
-                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Inputs</h4>
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">User inputs</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Target Monthly Income (USD)
+                                        Capital (USD)
                                     </label>
                                     <input
                                         type="number"
-                                        value={fiatPlanner.targetMonthlyIncome}
-                                        onChange={(e) => handleFiatPlannerChange("targetMonthlyIncome", e.target.value)}
-                                        placeholder="500"
+                                        value={fiatPlanner.capital === "" ? "" : fiatPlanner.capital}
+                                        onChange={(e) => handleFiatPlannerChange("capital", e.target.value === "" ? "" : Number(e.target.value))}
+                                        placeholder="100000"
+                                        min={0}
                                         className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Target Annual Income (USD) <span className="text-slate-400 font-normal">(alternative)</span>
+                                        Duration (months)
                                     </label>
                                     <input
                                         type="number"
-                                        value={fiatPlanner.targetAnnualIncome}
-                                        onChange={(e) => handleFiatPlannerChange("targetAnnualIncome", e.target.value)}
-                                        placeholder="6000"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Horizon (months)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={fiatPlanner.horizon}
-                                        onChange={(e) => handleFiatPlannerChange("horizon", parseInt(e.target.value) || 12)}
+                                        value={fiatPlanner.durationMonths ?? 12}
+                                        onChange={(e) => handleFiatPlannerChange("durationMonths", e.target.value === "" ? "" : parseInt(e.target.value, 10) || 12)}
                                         placeholder="12"
+                                        min={1}
+                                        max={120}
                                         className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
                                     />
                                 </div>
-                                <div>
+                                <div className="md:col-span-2">
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Region
-                                    </label>
-                                    <select
-                                        value={fiatPlanner.region}
-                                        onChange={(e) => handleFiatPlannerChange("region", e.target.value)}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    >
-                                        <option value="UAE">UAE</option>
-                                        <option value="US">US</option>
-                                        <option value="EU">EU</option>
-                                        <option value="UK">UK</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Liquidity Preference
-                                    </label>
-                                    <select
-                                        value={fiatPlanner.liquidityPreference}
-                                        onChange={(e) => handleFiatPlannerChange("liquidityPreference", e.target.value)}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    >
-                                        <option value="On-demand">On-demand</option>
-                                        <option value="Weekly">Weekly</option>
-                                        <option value="Monthly">Monthly</option>
-                                        <option value="Termed">Termed</option>
-                                        <option value="Market-traded">Market-traded</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Mode
+                                        Allocation mode
                                     </label>
                                     <div className="flex gap-2">
                                         <button
+                                            type="button"
                                             onClick={() => {
                                                 handleFiatPlannerChange("mode", "Guided");
                                                 if (fiatPlanner.mode !== "Guided") {
@@ -1334,6 +1629,7 @@ export default function IncomePlannersPage() {
                                             Guided
                                         </button>
                                         <button
+                                            type="button"
                                             onClick={() => handleFiatPlannerChange("mode", "Custom")}
                                             className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
                                                 fiatPlanner.mode === "Custom"
@@ -1345,248 +1641,482 @@ export default function IncomePlannersPage() {
                                         </button>
                                     </div>
                                 </div>
-                                {fiatPlanner.mode === "Guided" && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                            Risk Posture
-                                        </label>
-                                        <select
-                                            value={fiatPlanner.riskPosture}
-                                            onChange={(e) => handleFiatPlannerChange("riskPosture", e.target.value)}
-                                            className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white"
-                                        >
-                                            <option value="Conservative">Conservative</option>
-                                            <option value="Balanced">Balanced</option>
-                                            <option value="Aggressive">Aggressive</option>
-                                        </select>
-                                    </div>
-                                )}
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        id="excludeDiscretionary"
-                                        checked={fiatPlanner.excludeDiscretionary}
-                                        onChange={(e) => handleFiatPlannerChange("excludeDiscretionary", e.target.checked)}
-                                        className="w-4 h-4"
-                                    />
-                                    <label htmlFor="excludeDiscretionary" className="text-sm text-slate-700 dark:text-slate-700">
-                                        Exclude discretionary-rate products
-                                    </label>
-                                </div>
                             </div>
                         </div>
 
                         {/* Instrument Selection */}
                         {fiatPlanner.mode === "Custom" && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
+                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/40 dark:border-slate-800/40 p-6 md:p-8 shadow-sm overflow-hidden"
+                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.03)' }}
                             >
-                                <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Select Instruments</h4>
+                                <div className="mb-6 pb-4 border-b-2 border-slate-200">
+                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-1 flex items-center gap-2">
+                                        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-100 text-blue-600">
+                                            <Wallet size={22} />
+                                        </span>
+                                        Choose providers and allocate investments
+                                    </h4>
+                                    <p className="text-sm text-slate-600 dark:text-slate-600 flex items-center gap-1.5 mt-2">
+                                        <Percent size={14} className="text-emerald-500" />
+                                        Total allocation must equal <span className="font-semibold text-emerald-700">100%</span>.
+                                    </p>
+                                </div>
                                 {fiatInstrumentsLoading ? (
-                                    <p className="text-slate-500 py-4">Loading instruments…</p>
+                                    <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                                        <RefreshCw size={32} className="animate-spin text-blue-500 mb-3" />
+                                        <p>Loading providers…</p>
+                                    </div>
+                                ) : fiatInstruments.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-12 px-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center">
+                                        <Wallet size={40} className="text-slate-300 mb-3" />
+                                        <p className="text-slate-600 font-medium">No providers yet</p>
+                                        <p className="text-sm text-slate-500 mt-1">Add some in Admin → Crypto Lending Providers or use Load top 20 from ChatGPT.</p>
+                                    </div>
                                 ) : (
                                 <div className="space-y-3">
-                                    {fiatInstruments.map((instr) => (
-                                        <div key={instr.id} className="border border-slate-200 rounded-lg p-4">
-                                            <div className="flex items-start gap-3">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={instr.selected}
-                                                    onChange={() => handleInstrumentToggle(instr.id)}
-                                                    className="mt-1 w-4 h-4"
-                                                />
-                                                <div className="flex-1">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <div>
-                                                            <h5 className="font-semibold text-slate-900 dark:text-slate-900">{instr.name}</h5>
-                                                            <p className="text-xs text-slate-600 dark:text-slate-600">{instr.issuer} • {instr.type}</p>
+                                    {fiatInstruments.map((instr) => {
+                                        const scoreInfo = fiatScoredRanking.find((s) => s.id === instr.id);
+                                        const isSelected = instr.selected;
+                                        return (
+                                        <div
+                                            key={instr.id}
+                                            className={`rounded-xl border-2 p-4 transition-all duration-200 ${
+                                                isSelected
+                                                    ? "border-blue-300 bg-blue-50/50 dark:bg-blue-50/20 shadow-sm"
+                                                    : "border-slate-200 bg-slate-50/30 hover:border-slate-300 hover:bg-slate-50/50"
+                                            }`}
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <label className="flex-shrink-0 mt-1 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleInstrumentToggle(instr.id)}
+                                                        className="w-5 h-5 rounded border-2 border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                                                    />
+                                                </label>
+                                                <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
+                                                    <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-200/80 text-slate-600 flex-shrink-0">
+                                                        <Wallet size={18} />
+                                                    </span>
+                                                    <h5 className="font-semibold text-slate-900 dark:text-slate-900">{instr.name}</h5>
+                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200/60 text-xs font-medium tabular-nums">
+                                                        <Percent size={11} className="text-emerald-600" />
+                                                        {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/60 text-xs font-medium tabular-nums">
+                                                        <Activity size={11} className="text-amber-600" />
+                                                        HV30: {instr.hv30Pct != null ? `${Number(instr.hv30Pct).toFixed(1)}%` : "—"}
+                                                    </span>
+                                                    <span className="text-xs text-slate-500">{instr.type}</span>
+                                                    {scoreInfo != null && (
+                                                        <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[11px] font-medium">
+                                                            <Award size={10} /> {scoreInfo.final_score.toFixed(2)}
+                                                        </span>
+                                                    )}
+                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-sky-50 text-sky-800 border border-sky-200/60 text-xs">
+                                                        <Droplets size={11} className="text-sky-600" />
+                                                        {instr.liquidity}
+                                                    </span>
+                                                    {isSelected && (
+                                                        <div className="flex items-center gap-1 ml-auto bg-white rounded-lg border-2 border-blue-200 px-3 py-1.5 shadow-sm">
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="100"
+                                                                value={instr.weight}
+                                                                onChange={(e) => handleWeightChange(instr.id, e.target.value)}
+                                                                className="w-14 text-center text-lg font-bold text-slate-900 bg-transparent border-0 focus:ring-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                            />
+                                                            <span className="text-sm font-semibold text-blue-600">%</span>
                                                         </div>
-                                                        {instr.selected && (
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    type="number"
-                                                                    min="0"
-                                                                    max="100"
-                                                                    value={instr.weight}
-                                                                    onChange={(e) => handleWeightChange(instr.id, e.target.value)}
-                                                                    className="w-20 px-2 py-1 border border-slate-300 rounded text-sm font-bold text-slate-900"
-                                                                />
-                                                                <span className="text-sm text-slate-600">%</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-600 dark:text-slate-600">
-                                                        <div>
-                                                            <span className="font-medium">APY:</span> {instr.apyMin != null && instr.apyMax != null ? `${instr.apyMin}% - ${instr.apyMax}%` : (instr.rateType || "—")}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Type:</span> {instr.rateType}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Liquidity:</span> {instr.liquidity}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Seniority:</span> {instr.seniority}
-                                                        </div>
-                                                    </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
-                                    ))}
-                                    <div className="text-sm text-slate-600 dark:text-slate-600 mt-2">
-                                        Total Weight: {fiatInstruments.filter(i => i.selected).reduce((sum, i) => sum + (i.weight || 0), 0).toFixed(1)}%
+                                    );})}
+                                    {(() => {
+                                        const total = fiatInstruments.filter(i => i.selected).reduce((sum, i) => sum + (i.weight || 0), 0);
+                                        const isComplete = Math.abs(total - 100) < 0.01;
+                                        return (
+                                    <div className={`mt-4 flex flex-wrap items-center gap-3 rounded-xl border-2 px-4 py-3 ${isComplete ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-50/30" : "border-amber-200 bg-amber-50/50 dark:bg-amber-50/20"}`}>
+                                        <span className={`flex items-center gap-2 font-semibold ${isComplete ? "text-emerald-800" : "text-amber-800"}`}>
+                                            {isComplete ? (
+                                                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-200 text-emerald-800">
+                                                    <Percent size={16} />
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-200 text-amber-800">
+                                                    <AlertTriangle size={16} />
+                                                </span>
+                                            )}
+                                            Total weight: <span className="tabular-nums">{total.toFixed(1)}%</span>
+                                        </span>
+                                        {!isComplete && (
+                                            <span className="text-sm text-amber-700">Must be 100% to show results</span>
+                                        )}
                                     </div>
+                                    );})()}
                                 </div>
                                 )}
                             </div>
                         )}
 
-                        {/* Risk & Warnings Panel */}
-                        {fiatResults && fiatResults.warnings.length > 0 && (
+                        {/* Top 5 providers by final_score (both modes) */}
+                        {fiatTop5.length > 0 && (
                             <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
                                 style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
                             >
-                                <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4 flex items-center gap-2">
-                                    <AlertTriangle className="text-amber-600" size={20} />
-                                    Risk & Warnings
-                                </h4>
-                                <div className="space-y-2">
-                                    {fiatResults.warnings.map((warning, idx) => (
-                                        <div
-                                            key={idx}
-                                            className={`p-3 rounded-lg border ${
-                                                warning.severity === "red"
-                                                    ? "bg-red-50 border-red-200 text-red-900"
-                                                    : "bg-amber-50 border-amber-200 text-amber-900"
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <AlertTriangle size={16} />
-                                                <span className="text-sm font-medium">{warning.message}</span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-2">
+                                        <Award size={20} className="text-amber-500" /> Top 5 providers (score)
+                                    </h4>
+                                    <p className="text-xs text-slate-500 flex items-center gap-1">
+                                        <TrendingUp size={12} /> Ranked by final score (APY / HV30 / liquidity)
+                                    </p>
+                                </div>
+                                <div className="overflow-x-auto rounded-xl border border-slate-200/60 bg-gradient-to-b from-slate-50/80 to-white shadow-inner">
+                                    <table className="min-w-full text-xs md:text-sm">
+                                        <thead>
+                                            <tr className="border-b-2 border-slate-200 bg-slate-100/70 text-slate-700 dark:text-slate-700 text-left">
+                                                <th className="py-2.5 pr-3 font-semibold w-12 text-center">
+                                                    <span className="inline-flex items-center justify-center gap-1"><Trophy size={14} className="text-amber-500" /> #</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold">
+                                                    <span className="inline-flex items-center gap-1.5"><Wallet size={14} className="text-blue-600" /> Provider</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold">Jurisdiction</th>
+                                                <th className="py-2.5 pr-4 font-semibold">
+                                                    <span className="inline-flex items-center gap-1.5"><Percent size={14} className="text-emerald-600" /> APY</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold">
+                                                    <span className="inline-flex items-center gap-1.5"><Activity size={14} className="text-amber-600" /> HV30</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold">
+                                                    <span className="inline-flex items-center gap-1.5"><Droplets size={14} className="text-sky-600" /> Liquidity</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold">
+                                                    <span className="inline-flex items-center gap-1.5"><Award size={14} className="text-emerald-600" /> Score</span>
+                                                </th>
+                                                <th className="py-2.5 pr-4 font-semibold hidden md:table-cell">
+                                                    <span className="inline-flex items-center gap-1.5"><DollarSign size={14} className="text-green-600" /> Income</span>
+                                                </th>
+                                                <th className="py-2.5 font-semibold hidden md:table-cell">
+                                                    <span className="inline-flex items-center gap-1.5"><DollarSign size={14} className="text-green-700" /> Max</span>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {fiatTop5.map((r, idx) => {
+                                                const annualMin = capitalForRevenue * r.apy_avg / 100;
+                                                const annualMax = capitalForRevenue * (r.apyMaxPct || r.apy_avg) / 100;
+                                                const rankBg = idx === 0 ? "bg-amber-100 text-amber-800 border-amber-200" : idx === 1 ? "bg-slate-200 text-slate-700 border-slate-300" : idx === 2 ? "bg-amber-100/80 text-amber-800 border-amber-200/80" : "bg-slate-100 text-slate-600 border-slate-200";
+                                                const hv30 = r.hv30Pct;
+                                                const hv30Color = hv30 < 12 ? "bg-emerald-100 text-emerald-800 border-emerald-200" : hv30 < 22 ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-orange-100 text-orange-800 border-orange-200";
+                                                return (
+                                                    <tr key={r.id} className="border-b border-slate-100 last:border-0 bg-white/70 hover:bg-slate-50/80 transition-colors">
+                                                        <td className="py-2.5 pr-3 text-center">
+                                                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border-2 font-bold text-sm tabular-nums ${rankBg}`} title={`Rank ${idx + 1}`}>
+                                                                {idx + 1}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                                                                    <Wallet size={14} className="text-blue-600" />
+                                                                </span>
+                                                                <div className="flex flex-col min-w-0">
+                                                                    <span className="text-slate-900 dark:text-slate-900 font-semibold">{r.name}</span>
+                                                                    <span className="text-[11px] text-slate-500">Type: {r.type || "N/A"}</span>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4 text-slate-700 dark:text-slate-700">
+                                                            {r.jurisdiction ?? "—"}
+                                                        </td>
+                                                        <td className="py-2.5 pr-4 tabular-nums">
+                                                            <span className="inline-flex items-center gap-1 rounded-lg px-2 py-1 bg-emerald-50 text-emerald-800 font-medium border border-emerald-200/60">
+                                                                <Percent size={12} className="text-emerald-600" />
+                                                                {r.apyMinPct != null && r.apyMaxPct != null
+                                                                    ? `${r.apyMinPct.toFixed(1)}% – ${r.apyMaxPct.toFixed(1)}%`
+                                                                    : r.apy_avg.toFixed(1) + "%"}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4">
+                                                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] tabular-nums font-medium border ${hv30Color}`}>
+                                                                <Activity size={11} />
+                                                                {r.hv30Pct.toFixed(1)}%
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4">
+                                                            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] capitalize font-medium bg-sky-50 text-sky-800 border border-sky-200/60">
+                                                                <Droplets size={11} className="text-sky-600" />
+                                                                {r.liquidity}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4 tabular-nums">
+                                                            <span className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] bg-emerald-100 text-emerald-800 font-bold border border-emerald-200/60">
+                                                                <Award size={12} className="text-emerald-600" />
+                                                                {r.final_score.toFixed(2)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 pr-4 tabular-nums hidden md:table-cell">
+                                                            <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-700 font-medium">
+                                                                <DollarSign size={12} className="text-green-600" />
+                                                                ${annualMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2.5 tabular-nums hidden md:table-cell">
+                                                            <span className="inline-flex items-center gap-1 text-green-800 dark:text-green-800 font-semibold">
+                                                                <DollarSign size={12} className="text-green-600" />
+                                                                ${annualMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         )}
 
-                        {/* Red Risk Acknowledgement Gate */}
-                        {fiatResults && fiatResults.hasRedWarnings && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-red-200 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                            >
-                                <div className="flex items-start gap-3">
-                                    <AlertTriangle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
-                                    <div className="flex-1">
-                                        <h4 className="font-semibold text-red-900 mb-2">Red Risk Acknowledgement Required</h4>
-                                        <p className="text-sm text-red-700 mb-4">
-                                            Your portfolio contains high-risk elements. Please acknowledge the risks before viewing results.
-                                        </p>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={redRiskAcknowledged}
-                                                onChange={(e) => setRedRiskAcknowledged(e.target.checked)}
-                                                className="w-4 h-4"
-                                            />
-                                            <span className="text-sm text-red-900 font-medium">
-                                                I acknowledge the risks and understand that these are estimates only
-                                            </span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Results - Only shown if no red warnings or acknowledged */}
-                        {fiatResults && (!fiatResults.hasRedWarnings || redRiskAcknowledged) && (
+                        {/* Results */}
+                        {fiatResults && (
                             <>
-                                {/* Allocation Summary */}
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
+                                {/* Allocation Summary — sorted by score, with income ranges */}
+                                {(() => {
+                                    const capital = Number(fiatPlanner.capital) || 0;
+                                    const sortedSelected = [...fiatResults.selected].sort((a, b) => {
+                                        const scoreA = fiatScoredRanking.find((s) => s.id === a.id)?.final_score ?? 0;
+                                        const scoreB = fiatScoredRanking.find((s) => s.id === b.id)?.final_score ?? 0;
+                                        return scoreB - scoreA;
+                                    });
+                                    const pctMin = (i) => (i.apyMinPct != null ? Number(i.apyMinPct) : (i.apyMin != null ? Number(i.apyMin) * 100 : 0));
+                                    const pctMax = (i) => (i.apyMaxPct != null ? Number(i.apyMaxPct) : (i.apyMax != null ? Number(i.apyMax) * 100 : 0));
+                                    return (
+                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/40 dark:border-slate-800/40 p-6 md:p-8 shadow-sm"
+                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.03)' }}
                                 >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Allocation Summary</h4>
+                                    <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-200">
+                                        <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-2">
+                                            <LayoutList className="text-slate-600 dark:text-slate-600" size={22} />
+                                            Allocation Summary
+                                        </h4>
+                                        <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                                            <Award size={14} className="text-amber-500" />
+                                            Ranked by score • Rate as of: {new Date(fiatResults.rateAsOf).toLocaleString()}
+                                        </p>
+                                    </div>
+                                    {/* Annual & Monthly income range — prominent */}
+                                    {fiatResults.expectedIncomeMin != null && fiatResults.expectedIncomeMax != null && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                                            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-50/80 border border-emerald-200/60 p-4">
+                                                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-800 uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                                                    <Calendar size={14} /> Annual income range
+                                                </p>
+                                                <p className="text-xl font-bold text-emerald-900 dark:text-emerald-900 tabular-nums">
+                                                    ${fiatResults.expectedIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${fiatResults.expectedIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                </p>
+                                                <p className="text-xs text-emerald-600 mt-1">/ year</p>
+                                            </div>
+                                            <div className="rounded-xl bg-slate-50 dark:bg-slate-50 border border-slate-200/60 p-4">
+                                                <p className="text-xs font-medium text-slate-600 dark:text-slate-600 uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                                                    <CalendarDays size={14} /> Monthly income range
+                                                </p>
+                                                <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                    ${(fiatResults.expectedIncomeMin / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${(fiatResults.expectedIncomeMax / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                </p>
+                                                <p className="text-xs text-slate-500 mt-1">/ month</p>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="space-y-3">
-                                        {fiatResults.selected.map((instr, idx) => (
-                                            <div key={idx} className="border-b border-slate-100 pb-3 last:border-0">
-                                                <div className="flex items-center justify-between mb-1">
+                                        {sortedSelected.map((instr, idx) => {
+                                            const ranking = fiatScoredRanking.find((r) => r.id === instr.id);
+                                            const finalScore = ranking?.final_score ?? 0;
+                                            const recLevel = finalScore > 1 ? "Recommended" : finalScore >= 0.7 ? "Moderate" : "Avoid";
+                                            const annualMin = capital * (instr.weight / 100) * (pctMin(instr) / 100);
+                                            const annualMax = capital * (instr.weight / 100) * (pctMax(instr) / 100);
+                                            return (
+                                            <div key={instr.id} className="rounded-xl border border-slate-200/60 bg-slate-50/50 dark:bg-slate-50/30 p-4 flex flex-wrap items-start justify-between gap-3">
+                                                <div className="flex items-start gap-3 min-w-0">
+                                                    <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-200 text-slate-700 dark:text-slate-700 font-bold text-sm flex items-center justify-center tabular-nums" title="Rank">
+                                                        {idx + 1}
+                                                    </span>
                                                     <div>
-                                                        <span className="font-semibold text-slate-900 dark:text-slate-900">{instr.name}</span>
-                                                        <span className="text-sm text-slate-600 dark:text-slate-600 ml-2">{instr.weight}%</span>
-                                                    </div>
-                                                    <div className="text-xs text-slate-500">
-                                                        {instr.rateType} • {instr.liquidity} • {instr.seniority}
+                                                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                            <span className="font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-1.5">
+                                                                <Wallet size={14} className="text-slate-500" /> {instr.name}
+                                                            </span>
+                                                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold bg-slate-200 text-slate-700 tabular-nums">
+                                                                {instr.weight}%
+                                                            </span>
+                                                            <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs font-medium ${
+                                                                recLevel === "Recommended" ? "bg-green-100 text-green-800" :
+                                                                recLevel === "Moderate" ? "bg-blue-100 text-blue-800" :
+                                                                "bg-slate-100 text-slate-700"
+                                                            }`}>
+                                                                {recLevel}
+                                                            </span>
+                                                            <span className="text-xs text-slate-500 tabular-nums">score {finalScore.toFixed(2)}</span>
+                                                        </div>
+                                                        <p className="text-xs text-slate-500 mb-1">{instr.type} • {String(instr.liquidity || "").toLowerCase()}</p>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-600 tabular-nums flex items-center gap-1">
+                                                            <Percent size={12} className="text-slate-500" />
+                                                            APY: {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : "—")}
+                                                        </p>
                                                     </div>
                                                 </div>
-                                                <div className="text-xs text-slate-500">
-                                                    APY: {instr.apyMin != null && instr.apyMax != null ? `${instr.apyMin}% - ${instr.apyMax}%` : (instr.rateType || "—")} • Payment: {instr.paymentFreq}
+                                                <div className="flex flex-col items-end text-right flex-shrink-0">
+                                                    <p className="text-xs text-slate-500 mb-0.5 flex items-center gap-1">
+                                                        <DollarSign size={12} /> Est. income (this provider)
+                                                    </p>
+                                                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                        ${annualMin.toLocaleString('en-US', { maximumFractionDigits: 0 })} – ${annualMax.toLocaleString('en-US', { maximumFractionDigits: 0 })}/yr
+                                                    </p>
+                                                    <p className="text-xs text-slate-500 tabular-nums">
+                                                        ${(annualMin / 12).toLocaleString('en-US', { maximumFractionDigits: 0 })} – ${(annualMax / 12).toLocaleString('en-US', { maximumFractionDigits: 0 })}/mo
+                                                    </p>
                                                 </div>
                                             </div>
-                                        ))}
-                                        <div className="text-xs text-slate-500 mt-4">
-                                            Rate as of: {new Date(fiatResults.rateAsOf).toLocaleString()}
-                                        </div>
+                                        );})}
                                     </div>
                                 </div>
+                                    );
+                                })()}
 
-                                {/* Portfolio APY & Required Capital */}
+                                {/* Expected results (Guided: allocation across 3 providers; Custom: chosen allocation) */}
                                 <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
                                     style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
                                 >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Portfolio Analysis</h4>
+                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4 flex items-center gap-2">
+                                        <TrendingUp size={20} className="text-slate-600" />
+                                        {fiatPlanner.mode === "Guided" ? "Expected results with allocation across 3 providers" : "Expected results"}
+                                    </h4>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Portfolio APY Range</p>
+                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
+                                                <Percent size={14} /> Portfolio APY (min – max)
+                                            </p>
                                             <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                {fiatResults.portfolioApyMin.toFixed(2)}% - {fiatResults.portfolioApyMax.toFixed(2)}%
+                                                {fiatResults.portfolioApyMin.toFixed(1)}% – {fiatResults.portfolioApyMax.toFixed(1)}%
                                             </p>
                                             <p className="text-xs text-slate-500 mt-1">As of: {new Date(fiatResults.rateAsOf).toLocaleDateString()}</p>
                                         </div>
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Required Capital (Min APY)</p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                ${fiatResults.requiredCapitalMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                            </p>
-                                            <p className="text-xs text-slate-500 mt-1">Conservative estimate</p>
-                                        </div>
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Required Capital (Max APY)</p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                ${fiatResults.requiredCapitalMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                            </p>
-                                            <p className="text-xs text-slate-500 mt-1">Optimistic estimate</p>
-                                        </div>
+                                        {fiatResults.expectedIncomeMin != null && (
+                                            <>
+                                                <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
+                                                    <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
+                                                        <Calendar size={14} /> Annual income range
+                                                    </p>
+                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
+                                                        ${fiatResults.expectedIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${fiatResults.expectedIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                    </p>
+                                                    <p className="text-xs text-slate-500 mt-1">/ year</p>
+                                                </div>
+                                                <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
+                                                    <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
+                                                        <CalendarDays size={14} /> Monthly income range
+                                                    </p>
+                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
+                                                        ${(fiatResults.expectedIncomeMin / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${(fiatResults.expectedIncomeMax / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                    </p>
+                                                    <p className="text-xs text-slate-500 mt-1">/ month</p>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
 
-                                {/* Optional: Expected Income if Capital Provided */}
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                                >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Available Capital Analysis</h4>
-                                    <div className="mb-4">
-                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                            Available Capital (USD) <span className="text-slate-400 font-normal">(optional)</span>
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={fiatPlanner.availableCapital}
-                                            onChange={(e) => handleFiatPlannerChange("availableCapital", e.target.value)}
-                                            placeholder="100000"
-                                            className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                        />
-                                    </div>
-                                    {fiatResults.expectedIncomeMin && (
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Expected Annual Income Range</p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                ${fiatResults.expectedIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} - ${fiatResults.expectedIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
                             </>
                         )}
+
+                        {/* Save and recall scenario (like BTC Income Planner) */}
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-900 mb-3">Save and recall a scenario</h4>
+                            <div className="flex flex-wrap items-center gap-2 mb-4">
+                                <button
+                                    type="button"
+                                    onClick={saveFiatPlannerOutput}
+                                    disabled={!fiatResults}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                                >
+                                    <Save size={16} />
+                                    Save results
+                                </button>
+                                {fiatSaveMessage && (
+                                    <span className="text-sm text-slate-600 dark:text-slate-600">{fiatSaveMessage}</span>
+                                )}
+                            </div>
+                            {fiatPlannerSaves.length > 0 && (
+                                <div>
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Saved scenarios</p>
+                                    <ul className="space-y-2">
+                                        {fiatPlannerSaves.map((save) => {
+                                            const d = save.createdAt ? new Date(save.createdAt) : null;
+                                            const dateStr = d ? d.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                            const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "—";
+                                            const out = save.outputs;
+                                            const summaryStr = out
+                                                ? `Portfolio APY: ${out.portfolioApyMin?.toFixed(1) ?? "—"}% – ${out.portfolioApyMax?.toFixed(1) ?? "—"}% · Annual income: $${Number(out.expectedIncomeMin ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} – $${Number(out.expectedIncomeMax ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}/yr`
+                                                : "—";
+                                            return (
+                                                <li key={save.id} className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg border border-slate-200 bg-slate-50/50 dark:bg-slate-50/50">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-xs text-slate-500 dark:text-slate-500">
+                                                            Saved on {dateStr} at {timeStr}
+                                                        </span>
+                                                        <span className="text-sm text-slate-700 dark:text-slate-700">{summaryStr}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {fiatDeleteConfirmId === save.id ? (
+                                                            <>
+                                                                <span className="text-xs text-slate-600 dark:text-slate-600 mr-1">Delete?</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFiatDeleteConfirmId(null)}
+                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => deleteFiatPlannerSave(save.id)}
+                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-500"
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => recallFiatPlannerSave(save)}
+                                                                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-blue-500 text-blue-600 hover:bg-blue-500 hover:text-white focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                                                                >
+                                                                    Recall
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFiatDeleteConfirmId(save.id)}
+                                                                    className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 rounded focus:ring-2 focus:ring-red-500"
+                                                                    title="Delete"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Compliance Note */}
                         <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4 border border-slate-200">
@@ -1716,18 +2246,6 @@ export default function IncomePlannersPage() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Principal (USD)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={stablecoinPlanner.principal}
-                                        onChange={(e) => handleStablecoinPlannerChange("principal", e.target.value)}
-                                        placeholder="100000"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
                                         Target Monthly Income (USD) <span className="text-slate-400 font-normal">(optional)</span>
                                     </label>
                                     <input
@@ -1787,7 +2305,7 @@ export default function IncomePlannersPage() {
                                                     </div>
                                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-600 dark:text-slate-600 mb-2">
                                                         <div>
-                                                            <span className="font-medium">APY:</span> {instr.apyMin != null && instr.apyMax != null ? `${instr.apyMin}% - ${instr.apyMax}%` : (instr.rateType || "—")}
+                                                            <span className="font-medium">APY:</span> {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}
                                                         </div>
                                                         <div>
                                                             <span className="font-medium">Type:</span> {instr.rateType}
@@ -1814,65 +2332,8 @@ export default function IncomePlannersPage() {
                             </div>
                         )}
 
-                        {/* Risk & Warnings Panel */}
-                        {stablecoinResults && stablecoinResults.warnings.length > 0 && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                            >
-                                <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4 flex items-center gap-2">
-                                    <AlertTriangle className="text-amber-600" size={20} />
-                                    Risk & Warnings
-                                </h4>
-                                <div className="space-y-2">
-                                    {stablecoinResults.warnings.map((warning, idx) => (
-                                        <div
-                                            key={idx}
-                                            className={`p-3 rounded-lg border ${
-                                                warning.severity === "red"
-                                                    ? "bg-red-50 border-red-200 text-red-900"
-                                                    : "bg-amber-50 border-amber-200 text-amber-900"
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <AlertTriangle size={16} />
-                                                <span className="text-sm font-medium">{warning.message}</span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Red Risk Acknowledgement Gate */}
-                        {stablecoinResults && stablecoinResults.hasRedWarnings && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-red-200 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                            >
-                                <div className="flex items-start gap-3">
-                                    <AlertTriangle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
-                                    <div className="flex-1">
-                                        <h4 className="font-semibold text-red-900 mb-2">Red Risk Acknowledgement Required</h4>
-                                        <p className="text-sm text-red-700 mb-4">
-                                            Your portfolio contains high-risk elements. Please acknowledge the risks before viewing results.
-                                        </p>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={stablecoinRedRiskAcknowledged}
-                                                onChange={(e) => setStablecoinRedRiskAcknowledged(e.target.checked)}
-                                                className="w-4 h-4"
-                                            />
-                                            <span className="text-sm text-red-900 font-medium">
-                                                I acknowledge the risks and understand that these are estimates only
-                                            </span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Results - Only shown if no red warnings or acknowledged */}
-                        {stablecoinResults && (!stablecoinResults.hasRedWarnings || stablecoinRedRiskAcknowledged) && (
+                        {/* Results */}
+                        {stablecoinResults && (
                             <>
                                 {/* Allocation Table */}
                                 <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
@@ -1901,7 +2362,7 @@ export default function IncomePlannersPage() {
                                                         <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.venueType}</td>
                                                         <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.chain || "N/A"}</td>
                                                         <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.liquidity}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.apyMin != null && instr.apyMax != null ? `${instr.apyMin}% - ${instr.apyMax}%` : (instr.rateType || "—")}</td>
+                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}</td>
                                                         <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.rateType}</td>
                                                         <td className="py-3 px-4 text-sm font-semibold text-slate-900 dark:text-slate-900">{instr.weight}%</td>
                                                     </tr>
@@ -1958,6 +2419,67 @@ export default function IncomePlannersPage() {
                                 )}
                             </>
                         )}
+
+                        {/* Save and recall scenario (Stablecoin) */}
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-900 mb-3">Save and recall a scenario</h4>
+                            <div className="flex flex-wrap items-center gap-2 mb-4">
+                                <button
+                                    type="button"
+                                    onClick={saveStablecoinPlannerScenario}
+                                    disabled={!stablecoinResults}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                >
+                                    <Save size={16} />
+                                    Save
+                                </button>
+                                {stablecoinSaveMessage && (
+                                    <span className="text-sm text-slate-600 dark:text-slate-600">{stablecoinSaveMessage}</span>
+                                )}
+                            </div>
+                            {stablecoinPlannerSaves.length > 0 && (
+                                <div>
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Saved scenarios</p>
+                                    <ul className="space-y-2">
+                                        {stablecoinPlannerSaves.map((save) => {
+                                            const d = save.createdAt ? new Date(save.createdAt) : null;
+                                            const dateStr = d ? d.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                            const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "—";
+                                            const out = save.outputs;
+                                            const summaryStr = out
+                                                ? `Monthly income: $${Number(out.monthlyIncomeMin ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} – $${Number(out.monthlyIncomeMax ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+                                                : "—";
+                                            return (
+                                                <li key={save.id} className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg border border-slate-200 bg-slate-50/50 dark:bg-slate-50/50">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-xs text-slate-500 dark:text-slate-500">
+                                                            {dateStr} at {timeStr}
+                                                        </span>
+                                                        <span className="text-sm text-slate-700 dark:text-slate-700">{summaryStr}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {stablecoinDeleteConfirmId === save.id ? (
+                                                            <>
+                                                                <span className="text-xs text-slate-600 dark:text-slate-600 mr-1">Delete?</span>
+                                                                <button type="button" onClick={() => setStablecoinDeleteConfirmId(null)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</button>
+                                                                <button type="button" onClick={() => deleteStablecoinPlannerSave(save.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-500">Delete</button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <button type="button" onClick={() => recallStablecoinPlannerSave(save)} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-green-500 text-green-600 hover:bg-green-500 hover:text-white focus:ring-2 focus:ring-green-500 focus:ring-offset-2">Recall</button>
+                                                                <button type="button" onClick={() => setStablecoinDeleteConfirmId(save.id)} className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 rounded focus:ring-2 focus:ring-red-500" title="Delete"><Trash2 size={16} /></button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Compliance Note */}
                         <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4 border border-slate-200">

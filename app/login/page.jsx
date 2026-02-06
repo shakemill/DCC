@@ -155,6 +155,11 @@ export default function LoginPage() {
                 placeholder="Enter your password"
               />
               {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
+              <p className="mt-2 text-right">
+                <Link href="/forgot-password" className="text-sm text-[#f49d1d] hover:underline font-medium">
+                  Forgot password?
+                </Link>
+              </p>
             </div>
 
             {/* Submit Button */}

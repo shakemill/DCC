@@ -18,6 +18,8 @@ model User {
   emailVerified    Boolean   @default(false)
   verificationToken String?  @db.VarChar(255)
   verificationTokenExpires DateTime? @db.Timestamp(6)
+  resetPasswordToken String? @db.VarChar(255)
+  resetPasswordTokenExpires DateTime? @db.Timestamp(6)
   createdAt        DateTime  @default(now()) @db.Timestamp(6)
   updatedAt        DateTime  @updatedAt @db.Timestamp(6)
 
@@ -176,4 +178,39 @@ model SuitabilityReport {
   incomePlan     IncomePlan?    @relation(fields: [incomePlanId], references: [id], onDelete: SetNull)
 
   @@map("suitability_reports")
+}
+
+model ProductUniverse {
+  id                String   @id @default(uuid())
+  ticker            String   @db.VarChar(32)
+  product           String   @db.VarChar(512)
+  apyMinPct         Decimal? @db.Decimal(5, 2)
+  apyMaxPct         Decimal? @db.Decimal(5, 2)
+  rateType          String   @db.VarChar(64)
+  hv30VolatilityPct Decimal? @db.Decimal(5, 2)
+  seniority         String   @db.VarChar(255)
+  liquidityType     String?  @db.VarChar(32)
+  lockDurationYears Decimal? @db.Decimal(5, 2)
+  paymentFrequency  String?  @db.VarChar(64)
+  notes             String?  @db.Text
+  createdAt         DateTime @default(now()) @db.Timestamp(6)
+  updatedAt         DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("product_universe")
+}
+
+model CryptoLendingProvider {
+  id           String   @id @default(uuid())
+  provider     String   @db.VarChar(128)
+  type         String   @db.VarChar(64)
+  jurisdiction String?  @db.VarChar(128)
+  apyMin       Decimal? @db.Decimal(5, 2)
+  apyMax       Decimal? @db.Decimal(5, 2)
+  hv30Pct      Decimal? @db.Decimal(5, 2)
+  liquidity    String?  @db.VarChar(64)
+  comment      String?  @db.Text
+  createdAt    DateTime @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("crypto_lending_providers")
 }

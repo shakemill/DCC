@@ -494,6 +494,28 @@ async function main() {
     })
   }
 
+  // ---------- Product Universe (reference table) ----------
+  const productUniverseCount = await prisma.productUniverse.count()
+  if (productUniverseCount === 0) {
+    await prisma.productUniverse.createMany({
+      data: [
+        { ticker: 'STRC', product: 'Stretch preferred', apyMinPct: d(6), apyMaxPct: d(8), rateType: 'variable', hv30VolatilityPct: d(7), seniority: 'Preferred', liquidityType: 'high', lockDurationYears: d(0), paymentFrequency: 'Monthly', notes: '"par-stability" style design' },
+        { ticker: 'STRK', product: 'Strike Preferred', apyMinPct: d(8), apyMaxPct: d(8), rateType: 'fixed', hv30VolatilityPct: d(32), seniority: 'Preferred', liquidityType: 'medium', lockDurationYears: d(1), paymentFrequency: 'Monthly', notes: 'more equity-sensitive' },
+        { ticker: 'YBTC', product: 'BTC covered-call ETF', apyMinPct: d(8), apyMaxPct: d(14), rateType: 'variable', hv30VolatilityPct: d(28), seniority: 'ETF equity', liquidityType: 'high', lockDurationYears: d(0.5), paymentFrequency: 'Monthly', notes: 'distributions vary' },
+      ],
+    })
+    console.log('Product Universe: seeded STRC, STRK, YBTC.')
+  } else {
+    // Fill paymentFrequency for existing rows that have it null
+    const updated = await prisma.productUniverse.updateMany({
+      where: { paymentFrequency: null },
+      data: { paymentFrequency: 'Monthly' },
+    })
+    if (updated.count > 0) {
+      console.log(`Product Universe: set paymentFrequency='Monthly' for ${updated.count} existing product(s).`)
+    }
+  }
+
   console.log('Seed complete: DatasetVersion v1, 1A/1B/1C instruments + snapshots.')
 }
 

@@ -16,6 +16,10 @@ export const navLinks = [
                 href: "/features/yield-board",
             },
             {
+                name: "Product Universe",
+                href: "/features/product-universe",
+            },
+            {
                 name: "Reports",
                 href: "/features/reports",
             },
