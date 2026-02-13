@@ -97,9 +97,6 @@ export default function ContactPage() {
           <h1 className="text-4xl md:text-5xl font-bold mb-4">
             Contact <span className="bg-gradient-to-r from-[#f49d1d] dark:from-[#f5b84d] to-[#e88a0f] dark:to-[#f5a842] bg-clip-text text-transparent">Sales</span>
           </h1>
-          <p className="text-slate-600 dark:text-slate-400 text-lg max-w-xl mx-auto">
-            Get in touch with our team. We're here to help you understand how Digital Credit Compass can support your financial planning needs.
-          </p>
         </div>
 
         {/* Contact Form */}

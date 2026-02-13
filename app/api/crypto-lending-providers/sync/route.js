@@ -28,6 +28,16 @@ export async function POST() {
   }
 
   try {
+    if (!prisma?.cryptoLendingProvider) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Database model not available. On the server run: prisma generate && pnpm run build, then redeploy.',
+        },
+        { status: 503 }
+      )
+    }
     const openai = new OpenAI({ apiKey: apiKey.trim() })
 
     const systemPrompt = `You are a data assistant. Reply only with a valid JSON array of objects. No other text or markdown. Each object must have exactly these keys: provider (string, e.g. "Nexo"), type (string: "DeFi" or "CeFi"), jurisdiction (string, e.g. "EU", "US", "Global", "Singapore"), apyMin (number, APY min %), apyMax (number, APY max %), hv30Pct (number or null, volatility %), liquidity (string, e.g. "high", "medium", "low"), comment (string, short English note). Use null for unknown numeric fields.`

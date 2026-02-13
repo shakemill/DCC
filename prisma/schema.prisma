@@ -71,23 +71,9 @@ enum VenueType {
   RWA
 }
 
-model DatasetVersion {
-  id          String   @id @default(uuid())
-  version     String   @unique @db.VarChar(32)
-  description String?  @db.Text
-  effectiveAt DateTime @db.Timestamp(6)
-  createdAt   DateTime @default(now()) @db.Timestamp(6)
-
-  instruments       Instrument[]
-  suitabilityReports SuitabilityReport[]
-
-  @@map("dataset_versions")
-}
-
 model Instrument {
   id                String    @id @default(uuid())
   module            DccModule
-  datasetVersionId  String?   @db.VarChar(255)
   issuer            String    @db.VarChar(255)
   productName       String    @db.VarChar(512)
   collateral        String    @db.VarChar(255)
@@ -141,7 +127,6 @@ model Instrument {
   dailyLimit      String?    @db.VarChar(128)
   riskTags        Json?      // ["peg","counterparty",...]
 
-  datasetVersion DatasetVersion? @relation(fields: [datasetVersionId], references: [id], onDelete: SetNull)
   snapshots      InstrumentSnapshot[]
 
   @@map("instruments")
@@ -169,34 +154,13 @@ model SuitabilityReport {
   id                String     @id @default(uuid())
   userId            String     @db.VarChar(255)
   incomePlanId      String?    @db.VarChar(255)
-  datasetVersionId  String?    @db.VarChar(255)
   reportType        ReportType
   frozenData        Json       // instruments + snapshots + plan params
   createdAt         DateTime   @default(now()) @db.Timestamp(6)
 
-  datasetVersion DatasetVersion? @relation(fields: [datasetVersionId], references: [id], onDelete: SetNull)
   incomePlan     IncomePlan?    @relation(fields: [incomePlanId], references: [id], onDelete: SetNull)
 
   @@map("suitability_reports")
-}
-
-model ProductUniverse {
-  id                String   @id @default(uuid())
-  ticker            String   @db.VarChar(32)
-  product           String   @db.VarChar(512)
-  apyMinPct         Decimal? @db.Decimal(5, 2)
-  apyMaxPct         Decimal? @db.Decimal(5, 2)
-  rateType          String   @db.VarChar(64)
-  hv30VolatilityPct Decimal? @db.Decimal(5, 2)
-  seniority         String   @db.VarChar(255)
-  liquidityType     String?  @db.VarChar(32)
-  lockDurationYears Decimal? @db.Decimal(5, 2)
-  paymentFrequency  String?  @db.VarChar(64)
-  notes             String?  @db.Text
-  createdAt         DateTime @default(now()) @db.Timestamp(6)
-  updatedAt         DateTime @updatedAt @db.Timestamp(6)
-
-  @@map("product_universe")
 }
 
 model CryptoLendingProvider {
@@ -213,4 +177,66 @@ model CryptoLendingProvider {
   updatedAt    DateTime @updatedAt @db.Timestamp(6)
 
   @@map("crypto_lending_providers")
+}
+
+model BitcoinBackedLender {
+  id                String   @id @default(uuid())
+  issuerProvider    String   @db.VarChar(255)
+  productInstrument String   @db.VarChar(512)
+  apyCost           String?  @db.VarChar(128)
+  duration          String?  @db.VarChar(128)
+  collateral        String?  @db.VarChar(255)
+  jurisdiction      String?  @db.VarChar(128)
+  lockup            String?  @db.VarChar(128)
+  seniority         String?  @db.VarChar(255)
+  notes             String?  @db.Text
+  sources           String?  @db.VarChar(512)
+  category          String?  @db.VarChar(128)
+  createdAt         DateTime @default(now()) @db.Timestamp(6)
+  updatedAt         DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("bitcoin_backed_lenders")
+}
+
+model UsdIncomeProduct {
+  id                String   @id @default(uuid())
+  issuer            String   @db.VarChar(255)
+  product           String   @db.VarChar(255)
+  ticker            String   @db.VarChar(64)
+  type              String   @db.VarChar(128)
+  apyDistribution   String?  @db.VarChar(255)
+  duration          String?  @db.VarChar(128)
+  seniority         String?  @db.VarChar(128)
+  hv30Pct           Decimal? @db.Decimal(5, 2)
+  simpleDescription String?  @db.Text
+  availability      String?  @db.VarChar(255)
+  btcLinkage        String?  @db.VarChar(128)
+  keyRisks          String?  @db.Text
+  qualityScore      Int?     @db.Int
+  qualityScoreBreakdown String? @db.Text
+  createdAt         DateTime @default(now()) @db.Timestamp(6)
+  updatedAt         DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("usd_income_products")
+}
+
+model StablecoinProduct {
+  id           String   @id @default(uuid())
+  issuer       String   @db.VarChar(255)
+  product      String   @db.VarChar(512)
+  apy          String?  @db.VarChar(128)
+  duration     String?  @db.VarChar(128)
+  collateral   String?  @db.VarChar(255)
+  jurisdiction String?  @db.VarChar(255)
+  lockup       String?  @db.VarChar(128)
+  seniority    String?  @db.VarChar(255)
+  notes        String?  @db.Text
+  sources      String?  @db.VarChar(512)
+  category                String   @db.VarChar(64)
+  qualityScore            Int?     @db.Int
+  qualityScoreBreakdown   String?  @db.Text
+  createdAt               DateTime @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("stablecoin_products")
 }

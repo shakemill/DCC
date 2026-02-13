@@ -7,6 +7,16 @@ const toDecimal = (v) => (v != null && v !== '' ? new Prisma.Decimal(Number(v)) 
 
 export async function GET() {
   try {
+    if (!prisma?.cryptoLendingProvider) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Database model not available. On the server run: prisma generate && pnpm run build, then redeploy.',
+        },
+        { status: 503 }
+      )
+    }
     const providers = await prisma.cryptoLendingProvider.findMany({
       orderBy: [{ provider: 'asc' }],
     })
@@ -45,6 +55,16 @@ export async function POST(request) {
       hv30Pct: toDecimal(body.hv30Pct),
       liquidity: body.liquidity != null ? String(body.liquidity).trim() || null : null,
       comment: body.comment != null ? String(body.comment).trim() || null : null,
+    }
+    if (!prisma?.cryptoLendingProvider) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Database model not available. On the server run: prisma generate && pnpm run build, then redeploy.',
+        },
+        { status: 503 }
+      )
     }
     const created = await prisma.cryptoLendingProvider.create({ data })
     return NextResponse.json({ success: true, provider: serialize(created) })

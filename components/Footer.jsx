@@ -3,6 +3,7 @@ import { useThemeContext } from "@/context/ThemeContext";
 import { navLinks } from "@/data/navLinks";
 import Image from "next/image";
 import Link from "next/link";
+import { Facebook, Instagram } from "lucide-react";
 
 export default function Footer() {
     const { theme } = useThemeContext();
@@ -34,9 +35,6 @@ export default function Footer() {
                         <h2 className="font-bold mb-5">Legal</h2>
                         <ul className="space-y-2">
                             <li>
-                                <Link href="/legal" className="hover:text-[#f49d1d] transition">Legal</Link>
-                            </li>
-                            <li>
                                 <Link href="/disclosures" className="hover:text-[#f49d1d] transition">Disclosures & Methodology</Link>
                             </li>
                             <li>
@@ -48,13 +46,20 @@ export default function Footer() {
                         </ul>
                     </div>
                     <div>
-                        <h2 className="text-sm font-semibold mb-3">Contact Sales</h2>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
-                            Get in touch with our team. We&apos;re here to help you understand how Digital Credit Compass can support your financial planning needs.
-                        </p>
-                        <Link href="/contact" className="inline-block mt-2 text-xs font-medium text-[#f49d1d] hover:underline">
+                        <Link href="/contact" className="inline-block text-xs font-medium text-[#f49d1d] hover:underline">
                             Contact us →
                         </Link>
+                        <a href="mailto:support@digitalcreditcompass.com" className="block mt-1 text-xs text-slate-600 dark:text-slate-400 hover:text-[#f49d1d] transition">
+                            support@digitalcreditcompass.com
+                        </a>
+                        <div className="mt-3 flex items-center gap-3">
+                            <a href="https://www.facebook.com/profile.php?id=61587574312764" target="_blank" rel="noopener noreferrer" className="text-[#1877F2] hover:opacity-80 transition" aria-label="Facebook">
+                                <Facebook className="w-5 h-5" strokeWidth={1.5} />
+                            </a>
+                            <a href="https://www.instagram.com/digitalcreditcompass/" target="_blank" rel="noopener noreferrer" className="text-[#E4405F] hover:opacity-80 transition" aria-label="Instagram">
+                                <Instagram className="w-5 h-5" strokeWidth={1.5} />
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>

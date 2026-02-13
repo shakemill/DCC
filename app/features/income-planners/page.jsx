@@ -1,9 +1,25 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { Save, Clock, Eye, Trash2, ChevronDown, ChevronUp, AlertTriangle, X, Coins, DollarSign, CircleDollarSign, Info, RefreshCw, LayoutList, Calendar, CalendarDays, Award, TrendingUp, Wallet, Percent, Trophy, Activity, Droplets } from "lucide-react";
+import { Save, Clock, Eye, Trash2, ChevronDown, ChevronUp, AlertTriangle, X, Coins, DollarSign, CircleDollarSign, Info, RefreshCw, LayoutList, Calendar, CalendarDays, Award, TrendingUp, Wallet, Percent, Trophy, Activity, Droplets, Building2 } from "lucide-react";
+import { parseApy } from "@/lib/parseApy";
+import { getStablecoinTopProvidersCache, setStablecoinTopProvidersCache } from "@/lib/stablecoinCache";
+import { getFiatTopProvidersCache, setFiatTopProvidersCache } from "@/lib/fiatCache";
 import ProtectedFeature from "@/components/ProtectedFeature";
 import Breadcrumb from "@/components/Breadcrumb";
+
+function formatScoreBreakdownTooltip(jsonStr) {
+    try {
+        const b = jsonStr ? JSON.parse(jsonStr) : null;
+        if (!b || typeof b !== "object") return undefined;
+        const labels = ["Transparency", "Risk Control", "Jurisdiction", "Structure", "Track Record"];
+        const keys = ["transparency", "riskControl", "jurisdiction", "structure", "trackRecord"];
+        return labels.map((l, i) => `${l}: ${b[keys[i]] ?? "—"}`).join("\n");
+    } catch {
+        return undefined;
+    }
+}
+
 export default function IncomePlannersPage() {
     const { user } = useAuth();
     const [formData, setFormData] = useState({
@@ -35,39 +51,38 @@ export default function IncomePlannersPage() {
     const [btcDeleteConfirmId, setBtcDeleteConfirmId] = useState(null);
     const [btcPriceLoading, setBtcPriceLoading] = useState(false);
 
-    // Fiat Income Planner state (only Capital, Duration, Allocation mode are user inputs)
+    // Fiat Income Planner state (same design as Stablecoin: Capital, Duration, Scenario type)
     const [fiatPlanner, setFiatPlanner] = useState({
         capital: 100000,
         durationMonths: 12,
-        horizon: 12,
-        region: "US",
-        liquidityPreference: "Market-traded",
-        mode: "Guided",
-        riskPosture: "Balanced",
-        excludeDiscretionary: false,
+        scenarioType: "Modelled",
     });
-    const [fiatInstruments, setFiatInstruments] = useState([]);
-    const [fiatInstrumentsLoading, setFiatInstrumentsLoading] = useState(false);
-    const [fiatWarnings, setFiatWarnings] = useState([]);
+    const [fiatTopProviders, setFiatTopProviders] = useState([]);
+    const [fiatTopProvidersLoading, setFiatTopProvidersLoading] = useState(false);
+    const [fiatTopProvidersError, setFiatTopProvidersError] = useState(null);
+    const [fiatProvidersCached, setFiatProvidersCached] = useState(false);
+    const [fiatUserInstruments, setFiatUserInstruments] = useState([]);
+    const [fiatUserInstrumentsLoading, setFiatUserInstrumentsLoading] = useState(false);
     const [fiatPlannerSaves, setFiatPlannerSaves] = useState([]);
     const [fiatSaveMessage, setFiatSaveMessage] = useState("");
     const [fiatDeleteConfirmId, setFiatDeleteConfirmId] = useState(null);
-    const [fiatProviderRanking, setFiatProviderRanking] = useState(null);
 
-    // Stablecoin Income Planner state
+    // Stablecoin Income Planner state (DCC – Stable Income Planner)
     const [stablecoinPlanner, setStablecoinPlanner] = useState({
-        stablecoinAsset: "USDC",
-        horizon: 12,
-        region: "UAE",
-        liquidityPreference: "On-demand",
-        mode: "Guided",
-        targetMonthlyIncome: "",
+        capital: 100000,
+        baseStablecoin: "USDC",
+        durationMonths: 12,
+        scenarioType: "Modelled",
     });
-    const [stablecoinInstruments, setStablecoinInstruments] = useState([]);
-    const [stablecoinInstrumentsLoading, setStablecoinInstrumentsLoading] = useState(false);
-    const [stablecoinPlannerSaves, setStablecoinPlannerSaves] = useState([]);
-    const [stablecoinSaveMessage, setStablecoinSaveMessage] = useState("");
-    const [stablecoinDeleteConfirmId, setStablecoinDeleteConfirmId] = useState(null);
+    const [stablecoinTopProviders, setStablecoinTopProviders] = useState({
+        collateralisedLending: [],
+        cefiSavings: [],
+    });
+    const [stablecoinTopProvidersLoading, setStablecoinTopProvidersLoading] = useState(false);
+    const [stablecoinTopProvidersError, setStablecoinTopProvidersError] = useState(null);
+    const [stablecoinProvidersCached, setStablecoinProvidersCached] = useState(false);
+    const [stablecoinUserInstruments, setStablecoinUserInstruments] = useState([]);
+    const [stablecoinUserInstrumentsLoading, setStablecoinUserInstrumentsLoading] = useState(false);
 
     // Bitcoin price (you can fetch this from an API later)
     const bitcoinPrice = 40000; // Default price, can be updated with API
@@ -111,59 +126,41 @@ export default function IncomePlannersPage() {
         }
     }, [activeTab]);
 
-    // Apply guided allocation when mode changes to Guided or when fiat instruments load.
-    // Do not include fiatInstruments in deps: it would retrigger after setState → infinite loop.
+    // Load stablecoin top providers from cookie cache when switching to stablecoin tab or changing base stablecoin
     useEffect(() => {
-        if (fiatPlanner.mode === "Guided" && activeTab === "fiat" && !fiatInstrumentsLoading) {
-            applyGuidedAllocation();
+        if (activeTab === "stablecoin") {
+            const base = stablecoinPlanner.baseStablecoin || "USDC";
+            const cached = getStablecoinTopProvidersCache(base);
+            setStablecoinProvidersCached(!!cached);
+            setStablecoinTopProviders(
+                cached
+                    ? { collateralisedLending: cached.collateralisedLending, cefiSavings: cached.cefiSavings }
+                    : { collateralisedLending: [], cefiSavings: [] }
+            );
         }
-    }, [fiatPlanner.mode, fiatPlanner.region, fiatPlanner.excludeDiscretionary, fiatPlanner.durationMonths, activeTab, fiatInstrumentsLoading]);
+    }, [activeTab, stablecoinPlanner.baseStablecoin]);
 
-    // Apply stablecoin guided allocation when mode changes to Guided or when stablecoin instruments load.
-    // Do not include stablecoinInstruments in deps: it would retrigger after setState → infinite loop.
+    // User defined scenario: fetch all stablecoin products
     useEffect(() => {
-        if (stablecoinPlanner.mode === "Guided" && activeTab === "stablecoin" && !stablecoinInstrumentsLoading) {
-            applyStablecoinGuidedAllocation();
-        }
-    }, [stablecoinPlanner.mode, stablecoinPlanner.stablecoinAsset, stablecoinPlanner.region, activeTab, stablecoinInstrumentsLoading]);
-
-    // Fiat Income Planner: fetch from Crypto Lending Providers database
-    useEffect(() => {
-        if (activeTab !== "fiat") return;
+        if (activeTab !== "stablecoin" || stablecoinPlanner.scenarioType !== "User defined") return;
         let cancelled = false;
-        setFiatInstrumentsLoading(true);
-        fetch("/api/crypto-lending-providers")
+        setStablecoinUserInstrumentsLoading(true);
+        fetch("/api/stablecoin-products")
             .then((res) => res.json())
             .then((data) => {
-                if (cancelled || !data.success || !Array.isArray(data.providers)) return;
-                const mapped = (data.providers || []).map((p) => {
-                    const apyMinPct = p.apyMin != null ? Number(p.apyMin) : null;
-                    const apyMaxPct = p.apyMax != null ? Number(p.apyMax) : null;
-                    const liq = (p.liquidity || "high").toString().toLowerCase();
-                    return {
-                        id: p.id,
-                        name: p.provider || "—",
-                        type: p.type || "—",
-                        jurisdiction: p.jurisdiction != null ? String(p.jurisdiction).trim() || null : null,
-                        apyMinPct,
-                        apyMaxPct,
-                        apyMin: apyMinPct != null ? apyMinPct / 100 : null,
-                        apyMax: apyMaxPct != null ? apyMaxPct / 100 : null,
-                        hv30Pct: p.hv30Pct != null ? Number(p.hv30Pct) : null,
-                        hv30: p.hv30Pct != null ? Number(p.hv30Pct) / 100 : 0.01,
-                        liquidityType: liq,
-                        liquidity: p.liquidity || "—",
-                        comment: p.comment || "",
-                        issuer: "—",
-                        rateType: "variable",
-                        seniority: "—",
-                        region: ["Global"],
-                        paymentFreq: "—",
-                        selected: false,
-                        weight: 0,
-                    };
-                });
-                setFiatInstruments((prev) => {
+                if (cancelled || !data.success || !Array.isArray(data.products)) return;
+                const mapped = (data.products || []).map((p) => ({
+                    id: p.id,
+                    issuer: p.issuer || "—",
+                    product: p.product || "—",
+                    apy: p.apy,
+                    category: p.category || "—",
+                    qualityScore: p.qualityScore,
+                    qualityScoreBreakdown: p.qualityScoreBreakdown,
+                    selected: false,
+                    weight: 0,
+                }));
+                setStablecoinUserInstruments((prev) => {
                     const byId = new Map(prev.map((item) => [item.id, item]));
                     return mapped.map((m) => {
                         const old = byId.get(m.id);
@@ -171,14 +168,56 @@ export default function IncomePlannersPage() {
                     });
                 });
             })
-            .catch(() => { if (!cancelled) setFiatInstruments([]); })
-            .finally(() => { if (!cancelled) setFiatInstrumentsLoading(false); });
+            .catch(() => { if (!cancelled) setStablecoinUserInstruments([]); })
+            .finally(() => { if (!cancelled) setStablecoinUserInstrumentsLoading(false); });
         return () => { cancelled = true; };
-    }, [activeTab]);
+    }, [activeTab, stablecoinPlanner.scenarioType]);
+
+    // Fiat Income Planner: load top providers from cache when switching to fiat tab (Modelled)
+    useEffect(() => {
+        if (activeTab === "fiat" && fiatPlanner.scenarioType === "Modelled") {
+            const cached = getFiatTopProvidersCache();
+            setFiatProvidersCached(Array.isArray(cached) && cached.length > 0);
+            setFiatTopProviders(cached || []);
+        }
+    }, [activeTab, fiatPlanner.scenarioType]);
+
+    // Fiat Income Planner: fetch all products when User defined
+    useEffect(() => {
+        if (activeTab !== "fiat" || fiatPlanner.scenarioType !== "User defined") return;
+        let cancelled = false;
+        setFiatUserInstrumentsLoading(true);
+        fetch("/api/usd-income")
+            .then((res) => res.json())
+            .then((data) => {
+                if (cancelled || !data.success || !Array.isArray(data.products)) return;
+                const mapped = (data.products || []).map((p) => ({
+                    id: p.id,
+                    issuer: p.issuer || "—",
+                    product: p.product || "—",
+                    ticker: p.ticker || "—",
+                    type: p.type || "—",
+                    apyDistribution: p.apyDistribution,
+                    qualityScore: p.qualityScore,
+                    qualityScoreBreakdown: p.qualityScoreBreakdown,
+                    selected: false,
+                    weight: 0,
+                }));
+                setFiatUserInstruments((prev) => {
+                    const byId = new Map(prev.map((item) => [item.id, item]));
+                    return mapped.map((m) => {
+                        const old = byId.get(m.id);
+                        return old ? { ...m, selected: old.selected, weight: old.weight } : m;
+                    });
+                });
+            })
+            .catch(() => { if (!cancelled) setFiatUserInstruments([]); })
+            .finally(() => { if (!cancelled) setFiatUserInstrumentsLoading(false); });
+        return () => { cancelled = true; };
+    }, [activeTab, fiatPlanner.scenarioType]);
 
     const FIAT_PLANNER_STORAGE_KEY = "dcc_fiat_planner_saves";
     const BTC_PLANNER_STORAGE_KEY = "dcc_btc_planner_saves";
-    const STABLECOIN_PLANNER_STORAGE_KEY = "dcc_stablecoin_planner_saves";
     useEffect(() => {
         try {
             const raw = typeof window !== "undefined" ? localStorage.getItem(FIAT_PLANNER_STORAGE_KEY) : null;
@@ -201,72 +240,6 @@ export default function IncomePlannersPage() {
             setBtcPlannerSaves([]);
         }
     }, []);
-    useEffect(() => {
-        try {
-            const raw = typeof window !== "undefined" ? localStorage.getItem(STABLECOIN_PLANNER_STORAGE_KEY) : null;
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                setStablecoinPlannerSaves(Array.isArray(parsed) ? parsed : []);
-            }
-        } catch (_) {
-            setStablecoinPlannerSaves([]);
-        }
-    }, []);
-
-    // Fetch 1C instruments (stablecoin) from API
-    useEffect(() => {
-        if (activeTab !== "stablecoin") return;
-        let cancelled = false;
-        setStablecoinInstrumentsLoading(true);
-        fetch("/api/instruments?module=1C")
-            .then((res) => res.json())
-            .then((data) => {
-                if (cancelled || !data.success || !Array.isArray(data.instruments)) return;
-                const regionFromJurisdiction = (j) => {
-                    if (!j) return [];
-                    return j.split(/\s*\/\s*/).map((s) => s.trim()).filter(Boolean);
-                };
-                const mapped = (data.instruments || []).map((i) => {
-                    const snap = i.latestSnapshot || {};
-                    const region = Array.isArray(i.regionEligibility) && i.regionEligibility.length
-                        ? i.regionEligibility
-                        : regionFromJurisdiction(i.jurisdiction);
-                    const eligibilityStatus = region.length && !region.some((r) => r === "On-chain" || r === "Global")
-                        ? "Eligible"
-                        : "Check eligibility";
-                    return {
-                        id: i.id,
-                        issuer: i.issuer,
-                        productName: i.productName,
-                        venueType: i.venueType || "—",
-                        supportedAsset: i.supportedAsset || "USDC",
-                        chain: i.chain || null,
-                        apyMin: snap.apyMin != null ? Number(snap.apyMin) : null,
-                        apyMax: snap.apyMax != null ? Number(snap.apyMax) : null,
-                        rateType: snap.rateType || "Variable",
-                        rateAsOf: (snap.asOf || new Date()).toString(),
-                        liquidity: i.lockup || i.noticePeriod || "—",
-                        noticePeriod: i.noticePeriod || "None",
-                        regionEligibility: region.length ? region : ["Global"],
-                        eligibilityStatus,
-                        riskTags: Array.isArray(i.riskTags) ? i.riskTags : [],
-                        selected: false,
-                        weight: 0,
-                    };
-                });
-                setStablecoinInstruments((prev) => {
-                    const byId = new Map(prev.map((p) => [p.id, p]));
-                    return mapped.map((m) => {
-                        const old = byId.get(m.id);
-                        return old ? { ...m, selected: old.selected, weight: old.weight } : m;
-                    });
-                });
-            })
-            .catch(() => { if (!cancelled) setStablecoinInstruments([]); })
-            .finally(() => { if (!cancelled) setStablecoinInstrumentsLoading(false); });
-        return () => { cancelled = true; };
-    }, [activeTab]);
-
     const fetchBtcPrice = async () => {
         setBtcPriceLoading(true);
         try {
@@ -603,242 +576,98 @@ export default function IncomePlannersPage() {
         }));
     };
 
-    // Fiat Income Planner calculations (Capital, Duration, Allocation only)
-    const calculateFiatPlanner = () => {
-        const selected = fiatInstruments.filter(instr => instr.selected);
-        const totalWeight = selected.reduce((sum, instr) => sum + (instr.weight || 0), 0);
-
-        if (selected.length === 0 || totalWeight !== 100) return null;
-
-        // Portfolio APY range: same as spec — (weight/100)×APY per instrument, then sum
-        // Example: 0.50×6% + 0.30×8% + 0.20×8% = 7.0%; 0.50×8% + 0.30×8% + 0.20×14% = 9.2%
-        const pctMin = (instr) => (instr.apyMinPct != null ? Number(instr.apyMinPct) : (instr.apyMin != null ? Number(instr.apyMin) * 100 : 0));
-        const pctMax = (instr) => (instr.apyMaxPct != null ? Number(instr.apyMaxPct) : (instr.apyMax != null ? Number(instr.apyMax) * 100 : 0));
-        const portfolioApyMin = Math.round(selected.reduce((sum, instr) => sum + (Number(instr.weight) / 100) * pctMin(instr), 0) * 100) / 100;
-        const portfolioApyMax = Math.round(selected.reduce((sum, instr) => sum + (Number(instr.weight) / 100) * pctMax(instr), 0) * 100) / 100;
-
-        const capital = Number(fiatPlanner.capital) || 0;
-        // Annual income = capital × (APY% / 100); monthly = annual / 12
-        const expectedIncomeMin = capital > 0 ? Math.round((capital * portfolioApyMin / 100) * 100) / 100 : null;
-        const expectedIncomeMax = capital > 0 ? Math.round((capital * portfolioApyMax / 100) * 100) / 100 : null;
-        const requiredCapitalMin = null;
-        const requiredCapitalMax = null;
-        const targetAnnualIncome = null;
-        const targetMonthlyIncome = null;
-
-        // Stability Score (0–100): weighted by volatility (HV30), rate type, seniority
-        const volScore = (hv30) => {
-            const h = Number(hv30) ?? 0.2;
-            if (h < 0.1) return 90;
-            if (h < 0.2) return 75;
-            if (h < 0.35) return 55;
-            return 30;
-        };
-        const rateScore = (rateType) => ((rateType || "").toString().toLowerCase() === "fixed" ? 85 : 65);
-        const seniorityScore = (s) => ((s || "").toString().toLowerCase().includes("preferred") ? 60 : 45);
-        const weightSum = selected.reduce((s, i) => s + (i.weight || 0), 0) || 1;
-        const stabilityScore = Math.round(Math.min(100, Math.max(0,
-            selected.reduce((s, i) => {
-                const w = (i.weight || 0) / weightSum;
-                return s + w * (0.4 * volScore(i.hv30) + 0.35 * rateScore(i.rateType) + 0.25 * seniorityScore(i.seniority));
-            }, 0)
-        )));
-        const stabilityBadge = stabilityScore >= 75 ? "Low" : stabilityScore >= 55 ? "Moderate" : stabilityScore >= 40 ? "Variable" : "High";
-
-        // Generate warnings
-        const warnings = [];
-        
-        // Issuer concentration
-        const issuerWeights = {};
-        selected.forEach(instr => {
-            issuerWeights[instr.issuer] = (issuerWeights[instr.issuer] || 0) + instr.weight;
-        });
-        Object.entries(issuerWeights).forEach(([issuer, weight]) => {
-            if (weight > 70) {
-                warnings.push({ type: "issuer", severity: "red", message: `${issuer} concentration: ${weight.toFixed(1)}% (Red: >70%)` });
-            } else if (weight > 50) {
-                warnings.push({ type: "issuer", severity: "amber", message: `${issuer} concentration: ${weight.toFixed(1)}% (Amber: >50%)` });
-            }
-        });
-
-        // Liquidity mismatch
-        selected.forEach(instr => {
-            if (fiatPlanner.liquidityPreference === "On-demand" && instr.liquidity !== "On-demand") {
-                warnings.push({ type: "liquidity", severity: "amber", message: `${instr.name}: liquidity mismatch` });
-            }
-        });
-
-        // Discretionary-rate concentration
-        const discretionaryWeight = selected
-            .filter(instr => instr.rateType === "Discretionary")
-            .reduce((sum, instr) => sum + instr.weight, 0);
-        if (discretionaryWeight > 50) {
-            warnings.push({ type: "discretionary", severity: "red", message: `Discretionary-rate concentration: ${discretionaryWeight.toFixed(1)}% (Red: >50%)` });
-        } else if (discretionaryWeight > 30) {
-            warnings.push({ type: "discretionary", severity: "amber", message: `Discretionary-rate concentration: ${discretionaryWeight.toFixed(1)}% (Amber: >30%)` });
-        }
-
-        // Eligibility
-        selected.forEach(instr => {
-            const eligibleInRegion = instr.region?.includes(fiatPlanner.region) || instr.region?.includes("Global");
-            if (!eligibleInRegion) {
-                warnings.push({ type: "eligibility", severity: "red", message: `${instr.name}: not available in ${fiatPlanner.region}` });
-            }
-        });
-
-        // Risk notes: high volatility allocation (HV30; hv30 is stored as decimal e.g. 0.07 = 7%)
-        const hv30Pct = (instr) => (instr.hv30 != null ? Number(instr.hv30) * 100 : 0);
-        selected.forEach(instr => {
-            const pct = hv30Pct(instr);
-            const w = instr.weight || 0;
-            if (pct >= 25 && w >= 15) {
-                warnings.push({ type: "volatility", severity: "amber", message: `${w.toFixed(0)}% allocation to ${instr.name} has higher market volatility (HV30 ~${pct.toFixed(0)}%).` });
-            }
-        });
-
-        // Risk notes: variable / option-like distributions
-        selected.forEach(instr => {
-            const isVariable = (instr.rateType || "").toString().toLowerCase() === "variable";
-            const name = instr.name || "";
-            const looksLikeOption = /YBTC|BTC|option|covered.?call/i.test(name);
-            if (isVariable && looksLikeOption) {
-                warnings.push({ type: "variable", severity: "amber", message: `${instr.name}: distributions vary due to option premiums; upside may be capped in strong rallies.` });
-            }
-        });
-
-        // Generic risk note
-        warnings.push({ type: "mechanics", severity: "amber", message: "All payouts depend on issuer/fund mechanics; not guaranteed." });
-
-        const hasRedWarnings = warnings.some(w => w.severity === "red");
-
-        const rateAsOf = selected.length
-            ? selected.reduce((latest, instr) => {
-                const t = instr.rateAsOf ? new Date(instr.rateAsOf).getTime() : 0;
-                return t > latest ? t : latest;
-            }, 0)
-            : null;
-
-        return {
-            targetAnnualIncome,
-            targetMonthlyIncome: targetAnnualIncome != null ? targetAnnualIncome / 12 : null,
-            portfolioApyMin,
-            portfolioApyMax,
-            requiredCapitalMin,
-            requiredCapitalMax,
-            expectedIncomeMin,
-            expectedIncomeMax,
-            stabilityScore,
-            stabilityBadge,
-            warnings,
-            hasRedWarnings,
-            selected,
-            rateAsOf: rateAsOf ? new Date(rateAsOf).toISOString() : new Date().toISOString(),
-        };
-    };
-
-    const fiatResults = calculateFiatPlanner();
-
-    const handleFiatPlannerChange = (field, value) => {
-        setFiatPlanner(prev => ({ ...prev, [field]: value }));
-    };
-
-    const handleInstrumentToggle = (id) => {
-        setFiatInstruments(prev => prev.map(instr => 
-            instr.id === id 
-                ? { ...instr, selected: !instr.selected, weight: !instr.selected ? 0 : instr.weight }
-                : instr
-        ));
-    };
-
-    const handleWeightChange = (id, weight) => {
-        setFiatInstruments(prev => prev.map(instr => 
-            instr.id === id ? { ...instr, weight: parseFloat(weight) || 0 } : instr
-        ));
-    };
-
-    // Fiat scoring: duration_factor from Duration (months), liquidity_type factor, score_brut, final_score
-    function getDurationFactor(durationMonths) {
-        const m = durationMonths != null ? Number(durationMonths) : 12;
-        if (m <= 12) return 1;
-        if (m < 36) return 1.2;
-        return 1.5;
-    }
-    function getLiquidityFactor(liquidityType) {
-        const t = (liquidityType || "high").toString().toLowerCase();
-        if (t === "medium") return 1.1;
-        if (t === "locked") return 1.3;
-        return 1;
-    }
-    function computeFiatScores(providers, durationMonths) {
-        const duration_factor = getDurationFactor(durationMonths);
-        return providers
-            .map((p) => {
-                const hvRaw = p.hv30Pct != null ? Number(p.hv30Pct) : 0;
-                // Disqualify providers with HV30 = 0 (or missing)
-                if (!hvRaw || hvRaw <= 0) return null;
-
-                const apyMin = p.apyMinPct != null ? Number(p.apyMinPct) : 0;
-                const apyMax = p.apyMaxPct != null ? Number(p.apyMaxPct) : apyMin;
-                const apy_avg = (apyMin + apyMax) / 2;
-                const hv30Pct = hvRaw;
-                const score_brut = apy_avg / hv30Pct;
-                const score_after_duration = score_brut / duration_factor;
-                const liquidity_factor = getLiquidityFactor(p.liquidityType || p.liquidity);
-                const final_score = score_after_duration / liquidity_factor;
-                return {
-                    id: p.id,
-                    name: p.name,
-                    type: p.type,
-                    jurisdiction: p.jurisdiction != null ? String(p.jurisdiction).trim() || null : null,
-                    apyMinPct: apyMin,
-                    apyMaxPct: apyMax,
-                    apy_avg,
-                    hv30Pct,
-                    liquidity: (p.liquidityType || p.liquidity || "high").toString(),
-                    score_brut,
-                    score_after_duration,
-                    final_score,
-                };
-            })
-            .filter(Boolean)
-            .sort((a, b) => b.final_score - a.final_score);
-    }
-
-    const applyGuidedAllocation = () => {
-        if (fiatInstruments.length === 0) {
-            setFiatProviderRanking(null);
+    const fetchFiatTopProviders = async () => {
+        const cached = getFiatTopProvidersCache();
+        if (cached && cached.length > 0) {
+            setFiatTopProviders(cached);
+            setFiatTopProvidersError(null);
+            setFiatProvidersCached(true);
             return;
         }
-        const ranked = computeFiatScores(fiatInstruments, fiatPlanner.durationMonths);
-        const top5 = ranked.slice(0, 5);
-        const top3 = ranked.slice(0, 3);
-        const totalScore = top3.reduce((s, r) => s + r.final_score, 0);
-        const cap = 40;
-        let weights = totalScore > 0 ? top3.map((r) => (r.final_score / totalScore) * 100) : top3.map(() => 100 / 3);
-        weights = weights.map((w) => Math.min(w, cap));
-        const sum = weights.reduce((s, w) => s + w, 0);
-        const normalized = sum > 0 ? weights.map((w) => (w / sum) * 100) : weights.map(() => 100 / 3);
-        const allocation = top3.map((r, i) => ({ ...r, weight: Math.round(normalized[i] * 10) / 10 }));
-        let allocSum = allocation.reduce((s, a) => s + a.weight, 0);
-        if (allocSum !== 100 && allocation.length > 0) allocation[0].weight = Math.round((allocation[0].weight + (100 - allocSum)) * 10) / 10;
-        setFiatProviderRanking({ ranked, top5, allocation });
+        setFiatTopProvidersLoading(true);
+        setFiatTopProvidersError(null);
+        try {
+            const res = await fetch("/api/usd-income/select-top", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || "Failed to select providers");
+            const top = data.topProducts || [];
+            setFiatTopProviders(top);
+            setFiatTopProvidersCache(top);
+            setFiatProvidersCached(true);
+        } catch (e) {
+            setFiatTopProvidersError(e?.message || "Failed to load providers");
+            setFiatTopProviders([]);
+            setFiatProvidersCached(false);
+        } finally {
+            setFiatTopProvidersLoading(false);
+        }
+    };
 
-        const allocationById = new Map(allocation.map((a) => [a.id, a]));
-        setFiatInstruments((prev) =>
-            prev.map((instr) => {
-                const a = allocationById.get(instr.id);
-                if (!a) return { ...instr, selected: false, weight: 0 };
-                return { ...instr, selected: true, weight: a.weight };
-            })
+    const handleFiatPlannerChange = (field, value) => {
+        setFiatPlanner((prev) => ({ ...prev, [field]: value }));
+    };
+
+    const handleFiatInstrumentToggle = (id) => {
+        setFiatUserInstruments((prev) =>
+            prev.map((instr) =>
+                instr.id === id ? { ...instr, selected: !instr.selected, weight: !instr.selected ? 0 : instr.weight } : instr
+            )
         );
     };
 
-    const fiatScoredRanking = useMemo(
-        () => computeFiatScores(fiatInstruments, fiatPlanner.durationMonths),
-        [fiatInstruments, fiatPlanner.durationMonths]
-    );
-    const fiatTop5 = fiatScoredRanking.slice(0, 5);
-    const capitalForRevenue = Number(fiatPlanner.capital) || 0;
+    const handleFiatWeightChange = (id, weight) => {
+        setFiatUserInstruments((prev) =>
+            prev.map((instr) => (instr.id === id ? { ...instr, weight: parseFloat(weight) || 0 } : instr))
+        );
+    };
+
+    const fiatIncomeCalc = useMemo(() => {
+        const capital = parseFloat(fiatPlanner.capital) || 0;
+        const scenarioType = fiatPlanner.scenarioType || "Modelled";
+
+        if (scenarioType === "User defined") {
+            const selected = fiatUserInstruments.filter((i) => i.selected);
+            const totalWeight = selected.reduce((sum, i) => sum + (i.weight || 0), 0);
+            if (capital <= 0 || selected.length === 0 || Math.abs(totalWeight - 100) > 0.01) {
+                return {
+                    portfolioAPY: null,
+                    expectedAnnualIncome: 0,
+                    expectedMonthlyIncome: 0,
+                    canCompute: false,
+                    isUserDefined: true,
+                    totalWeight,
+                };
+            }
+            const portfolioAPY = selected.reduce((sum, i) => {
+                const apyNum = parseApy(i.apyDistribution);
+                return apyNum != null ? sum + (i.weight / 100) * apyNum : sum;
+            }, 0);
+            const expectedAnnualIncome = capital * (portfolioAPY / 100);
+            const expectedMonthlyIncome = expectedAnnualIncome / 12;
+            return {
+                portfolioAPY,
+                expectedAnnualIncome,
+                expectedMonthlyIncome,
+                canCompute: true,
+                isUserDefined: true,
+                totalWeight,
+            };
+        }
+
+        const top = fiatTopProviders || [];
+        const apyVals = top.map((p) => parseApy(p.apyDistribution)).filter((n) => n != null);
+        const portfolioAPY = apyVals.length > 0 ? apyVals.reduce((a, b) => a + b, 0) / apyVals.length : null;
+        const expectedAnnualIncome = portfolioAPY != null ? capital * (portfolioAPY / 100) : 0;
+        const expectedMonthlyIncome = expectedAnnualIncome / 12;
+        return {
+            portfolioAPY,
+            expectedAnnualIncome,
+            expectedMonthlyIncome,
+            canCompute: capital > 0 && portfolioAPY != null,
+            isUserDefined: false,
+            totalWeight: 100,
+        };
+    }, [fiatTopProviders, fiatPlanner.capital, fiatPlanner.scenarioType, fiatUserInstruments]);
 
     const persistFiatPlannerSaves = (list) => {
         setFiatPlannerSaves(list);
@@ -850,7 +679,7 @@ export default function IncomePlannersPage() {
     };
 
     const saveFiatPlannerOutput = () => {
-        if (!fiatResults) {
+        if (!fiatIncomeCalc?.canCompute) {
             setFiatSaveMessage("Fill in the fields and select instruments (100% weight) to get results.");
             setTimeout(() => setFiatSaveMessage(""), 3000);
             return;
@@ -862,17 +691,13 @@ export default function IncomePlannersPage() {
             inputs: {
                 capital: fiatPlanner.capital,
                 durationMonths: fiatPlanner.durationMonths,
-                mode: fiatPlanner.mode,
+                scenarioType: fiatPlanner.scenarioType,
             },
-            instruments: fiatInstruments.map((i) => ({ id: i.id, selected: i.selected, weight: i.weight ?? 0 })),
+            instruments: fiatUserInstruments.map((i) => ({ id: i.id, selected: i.selected, weight: i.weight ?? 0 })),
             outputs: {
-                portfolioApyMin: fiatResults.portfolioApyMin,
-                portfolioApyMax: fiatResults.portfolioApyMax,
-                expectedIncomeMin: fiatResults.expectedIncomeMin,
-                expectedIncomeMax: fiatResults.expectedIncomeMax,
-                stabilityScore: fiatResults.stabilityScore,
-                stabilityBadge: fiatResults.stabilityBadge,
-                rateAsOf: fiatResults.rateAsOf,
+                portfolioAPY: fiatIncomeCalc.portfolioAPY,
+                expectedAnnualIncome: fiatIncomeCalc.expectedAnnualIncome,
+                expectedMonthlyIncome: fiatIncomeCalc.expectedMonthlyIncome,
             },
         };
         setFiatPlannerSaves((prev) => {
@@ -893,7 +718,7 @@ export default function IncomePlannersPage() {
         setFiatPlanner((prev) => ({ ...prev, ...save.inputs }));
         if (save.instruments?.length) {
             const byId = new Map(save.instruments.map((s) => [s.id, s]));
-            setFiatInstruments((prev) =>
+            setFiatUserInstruments((prev) =>
                 prev.map((m) => {
                     const s = byId.get(m.id);
                     return s ? { ...m, selected: s.selected, weight: s.weight ?? 0 } : m;
@@ -949,239 +774,166 @@ export default function IncomePlannersPage() {
         setBtcDeleteConfirmId(null);
     };
 
-    const persistStablecoinPlannerSaves = (list) => {
-        setStablecoinPlannerSaves(list);
-        try {
-            if (typeof window !== "undefined") {
-                localStorage.setItem(STABLECOIN_PLANNER_STORAGE_KEY, JSON.stringify(list));
-            }
-        } catch (_) {}
-    };
-    const saveStablecoinPlannerScenario = () => {
-        if (!stablecoinResults) {
-            setStablecoinSaveMessage("Fill in the fields and select instruments (100% weight) to save.");
-            setTimeout(() => setStablecoinSaveMessage(""), 3000);
+    // Stable Income Planner: fetch top providers (cache 1 day in cookie to avoid ChatGPT API calls)
+    const fetchStablecoinTopProviders = async () => {
+        const base = stablecoinPlanner.baseStablecoin || "USDC";
+        const cached = getStablecoinTopProvidersCache(base);
+        if (cached) {
+            setStablecoinTopProviders(cached);
+            setStablecoinTopProvidersError(null);
+            setStablecoinProvidersCached(true);
             return;
         }
-        const createdAt = new Date().toISOString();
-        const save = {
-            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `stablecoin-${Date.now()}`,
-            createdAt,
-            inputs: {
-                stablecoinAsset: stablecoinPlanner.stablecoinAsset,
-                horizon: stablecoinPlanner.horizon,
-                region: stablecoinPlanner.region,
-                liquidityPreference: stablecoinPlanner.liquidityPreference,
-                mode: stablecoinPlanner.mode,
-                targetMonthlyIncome: stablecoinPlanner.targetMonthlyIncome,
-            },
-            instruments: stablecoinInstruments.map((i) => ({ id: i.id, selected: i.selected, weight: i.weight ?? 0 })),
-            outputs: {
-                monthlyIncomeMin: stablecoinResults.monthlyIncomeMin,
-                monthlyIncomeMax: stablecoinResults.monthlyIncomeMax,
-                totalIncomeMin: stablecoinResults.totalIncomeMin,
-                totalIncomeMax: stablecoinResults.totalIncomeMax,
-            },
-        };
-        const next = [save, ...stablecoinPlannerSaves].slice(0, 20);
-        persistStablecoinPlannerSaves(next);
-        setStablecoinSaveMessage("Scenario saved.");
-        setTimeout(() => setStablecoinSaveMessage(""), 3000);
-    };
-    const recallStablecoinPlannerSave = (save) => {
-        if (!save?.inputs) return;
-        setStablecoinPlanner((prev) => ({ ...prev, ...save.inputs }));
-        if (save.instruments?.length) {
-            const byId = new Map(save.instruments.map((s) => [s.id, s]));
-            setStablecoinInstruments((prev) =>
-                prev.map((m) => {
-                    const s = byId.get(m.id);
-                    return s ? { ...m, selected: s.selected, weight: s.weight ?? 0 } : m;
-                })
-            );
-        }
-        setStablecoinSaveMessage("Scenario recalled.");
-        setTimeout(() => setStablecoinSaveMessage(""), 3000);
-    };
-    const deleteStablecoinPlannerSave = (id) => {
-        persistStablecoinPlannerSaves(stablecoinPlannerSaves.filter((s) => s.id !== id));
-        setStablecoinDeleteConfirmId(null);
-    };
-
-    // Stablecoin Income Planner calculations (uses default principal for income projection)
-    const DEFAULT_STABLECOIN_PRINCIPAL = 100000;
-    const calculateStablecoinPlanner = () => {
-        const principal = parseFloat(stablecoinPlanner.principal) || DEFAULT_STABLECOIN_PRINCIPAL;
-        const horizon = stablecoinPlanner.horizon || 12;
-        const targetMonthly = parseFloat(stablecoinPlanner.targetMonthlyIncome) || 0;
-
-        // Filter by stablecoin asset
-        const filtered = stablecoinInstruments.filter(instr => 
-            instr.supportedAsset === stablecoinPlanner.stablecoinAsset
-        );
-
-        // Get selected instruments
-        const selected = filtered.filter(instr => instr.selected);
-        const totalWeight = selected.reduce((sum, instr) => sum + (instr.weight || 0), 0);
-
-        if (selected.length === 0 || totalWeight !== 100) return null;
-
-        // Calculate monthly income range
-        const monthlyIncomeMin = selected.reduce((sum, instr) => {
-            const eligible = instr.eligibilityStatus === "Eligible";
-            if (!eligible || instr.apyMin == null) return sum;
-            return sum + (principal * (instr.weight / 100) * (Number(instr.apyMin) / 100) / 12);
-        }, 0);
-        const monthlyIncomeMax = selected.reduce((sum, instr) => {
-            const eligible = instr.eligibilityStatus === "Eligible";
-            if (!eligible || instr.apyMax == null) return sum;
-            return sum + (principal * (instr.weight / 100) * (Number(instr.apyMax) / 100) / 12);
-        }, 0);
-
-        // Total income over horizon
-        const totalIncomeMin = monthlyIncomeMin * horizon;
-        const totalIncomeMax = monthlyIncomeMax * horizon;
-
-        // Gap vs target
-        const gapVsTarget = targetMonthly > 0 ? targetMonthly - monthlyIncomeMin : null;
-
-        // Generate warnings
-        const warnings = [];
-
-        // Eligibility warnings
-        selected.forEach(instr => {
-            if (instr.eligibilityStatus === "Not eligible") {
-                warnings.push({ type: "eligibility", severity: "red", message: `${instr.productName}: Not eligible in ${stablecoinPlanner.region}` });
-            } else if (instr.eligibilityStatus === "Check eligibility") {
-                warnings.push({ type: "eligibility", severity: "amber", message: `${instr.productName}: Check eligibility for ${stablecoinPlanner.region}` });
+        setStablecoinTopProvidersLoading(true);
+        setStablecoinTopProvidersError(null);
+        try {
+            const res = await fetch("/api/stablecoin-products/select-top", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ baseStablecoin: base }),
+            });
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || "Failed to select providers");
             }
-        });
-
-        // Liquidity mismatch
-        selected.forEach(instr => {
-            const pref = stablecoinPlanner.liquidityPreference;
-            if (pref === "On-demand" && instr.liquidity !== "On-demand" && instr.liquidity !== "Flexible") {
-                warnings.push({ type: "liquidity", severity: "amber", message: `${instr.productName}: liquidity mismatch (${instr.liquidity} vs ${pref})` });
-            } else if (pref === "24h" && (instr.liquidity === "Weekly" || instr.liquidity === "Monthly" || instr.liquidity === "Locked")) {
-                warnings.push({ type: "liquidity", severity: "red", message: `${instr.productName}: significant liquidity mismatch` });
-            }
-        });
-
-        // Counterparty concentration (CeFi)
-        const cefiWeights = {};
-        selected.filter(instr => instr.venueType === "CeFi").forEach(instr => {
-            cefiWeights[instr.issuer] = (cefiWeights[instr.issuer] || 0) + instr.weight;
-        });
-        Object.entries(cefiWeights).forEach(([issuer, weight]) => {
-            if (weight > 70) {
-                warnings.push({ type: "counterparty", severity: "red", message: `${issuer} concentration: ${weight.toFixed(1)}% (Red: >70%)` });
-            } else if (weight > 50) {
-                warnings.push({ type: "counterparty", severity: "amber", message: `${issuer} concentration: ${weight.toFixed(1)}% (Amber: >50%)` });
-            }
-        });
-
-        // Smart-contract exposure (DeFi)
-        const defiWeight = selected
-            .filter(instr => instr.venueType === "DeFi")
-            .reduce((sum, instr) => sum + instr.weight, 0);
-        if (defiWeight > 85) {
-            warnings.push({ type: "smart-contract", severity: "red", message: `DeFi exposure: ${defiWeight.toFixed(1)}% (Red: >85%)` });
-        } else if (defiWeight > 70) {
-            warnings.push({ type: "smart-contract", severity: "amber", message: `DeFi exposure: ${defiWeight.toFixed(1)}% (Amber: >70%)` });
+            const lending = data.collateralisedLending || [];
+            const cefi = data.cefiSavings || [];
+            setStablecoinTopProviders({ collateralisedLending: lending, cefiSavings: cefi });
+            setStablecoinTopProvidersCache(base, lending, cefi);
+            setStablecoinProvidersCached(true);
+        } catch (e) {
+            setStablecoinTopProvidersError(e?.message || "Failed to load providers");
+            setStablecoinTopProviders({ collateralisedLending: [], cefiSavings: [] });
+            setStablecoinProvidersCached(false);
+        } finally {
+            setStablecoinTopProvidersLoading(false);
         }
-
-        // Promo-rate exposure
-        const promoWeight = selected
-            .filter(instr => instr.rateType === "Promo")
-            .reduce((sum, instr) => sum + instr.weight, 0);
-        if (promoWeight > 50) {
-            warnings.push({ type: "promo", severity: "red", message: `Promo-rate exposure: ${promoWeight.toFixed(1)}% (Red: >50%)` });
-        } else if (promoWeight > 30) {
-            warnings.push({ type: "promo", severity: "amber", message: `Promo-rate exposure: ${promoWeight.toFixed(1)}% (Amber: >30%)` });
-        }
-
-        // Stablecoin concentration (100% in one asset - reminder)
-        if (selected.length === 1 && selected[0].weight === 100) {
-            warnings.push({ type: "peg", severity: "amber", message: `100% allocation to ${stablecoinPlanner.stablecoinAsset} - consider peg risk and issuer model` });
-        }
-
-        const hasRedWarnings = warnings.some(w => w.severity === "red");
-
-        const rateAsOf = selected.length
-            ? selected.reduce((latest, instr) => {
-                const t = instr.rateAsOf ? new Date(instr.rateAsOf).getTime() : 0;
-                return t > latest ? t : latest;
-            }, 0)
-            : null;
-
-        return {
-            monthlyIncomeMin,
-            monthlyIncomeMax,
-            totalIncomeMin,
-            totalIncomeMax,
-            gapVsTarget,
-            warnings,
-            hasRedWarnings,
-            selected,
-            rateAsOf: rateAsOf ? new Date(rateAsOf).toISOString() : new Date().toISOString(),
-        };
     };
-
-    const stablecoinResults = calculateStablecoinPlanner();
 
     const handleStablecoinPlannerChange = (field, value) => {
-        setStablecoinPlanner(prev => ({
-            ...prev,
-            [field]: value
-        }));
+        setStablecoinPlanner((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleStablecoinInstrumentToggle = (id) => {
-        setStablecoinInstruments(prev => prev.map(instr => 
-            instr.id === id 
-                ? { ...instr, selected: !instr.selected, weight: !instr.selected ? 0 : instr.weight }
-                : instr
-        ));
+        setStablecoinUserInstruments((prev) =>
+            prev.map((instr) =>
+                instr.id === id
+                    ? { ...instr, selected: !instr.selected, weight: !instr.selected ? 0 : instr.weight }
+                    : instr
+            )
+        );
     };
 
     const handleStablecoinWeightChange = (id, weight) => {
-        setStablecoinInstruments(prev => prev.map(instr => 
-            instr.id === id ? { ...instr, weight: parseFloat(weight) || 0 } : instr
-        ));
+        setStablecoinUserInstruments((prev) =>
+            prev.map((instr) =>
+                instr.id === id ? { ...instr, weight: parseFloat(weight) || 0 } : instr
+            )
+        );
     };
 
-    const applyStablecoinGuidedAllocation = () => {
-        const eligible = stablecoinInstruments.filter(instr => 
-            instr.supportedAsset === stablecoinPlanner.stablecoinAsset &&
-            (instr.eligibilityStatus === "Eligible" || instr.eligibilityStatus === "Check eligibility")
-        );
-        
-        if (eligible.length === 0) return;
+    // Modelled: APYA/APYB from top providers, 70/30 fixed. User defined: sum(weight x APY) per selected instrument.
+    const stablecoinIncomeCalc = useMemo(() => {
+        const capital = parseFloat(stablecoinPlanner.capital) || 0;
+        const scenarioType = stablecoinPlanner.scenarioType || "Modelled";
 
-        // Diversify across venue types
-        const defi = eligible.find(e => e.venueType === "DeFi");
-        const cefi = eligible.find(e => e.venueType === "CeFi");
-        const rwa = eligible.find(e => e.venueType === "RWA");
-
-        const allocation = [];
-        if (defi) allocation.push({ id: defi.id, weight: 40 });
-        if (cefi) allocation.push({ id: cefi.id, weight: 35 });
-        if (rwa) allocation.push({ id: rwa.id, weight: 25 });
-
-        // Normalize weights to 100%
-        const totalWeight = allocation.reduce((sum, a) => sum + a.weight, 0);
-        if (totalWeight > 0) {
-            allocation.forEach(a => a.weight = (a.weight / totalWeight) * 100);
+        if (scenarioType === "User defined") {
+            const selected = stablecoinUserInstruments.filter((i) => i.selected);
+            const totalWeight = selected.reduce((sum, i) => sum + (i.weight || 0), 0);
+            if (capital <= 0 || selected.length === 0 || Math.abs(totalWeight - 100) > 0.01) {
+                const defiPct = selected
+                    .filter((i) => i.category === "collateralised_lending")
+                    .reduce((s, i) => s + (i.weight || 0), 0);
+                const cefiPct = selected
+                    .filter((i) => i.category === "cefi_savings")
+                    .reduce((s, i) => s + (i.weight || 0), 0);
+                return {
+                    APYA: null,
+                    APYB: null,
+                    portfolioAPY: null,
+                    expectedAnnualIncome: 0,
+                    expectedMonthlyIncome: 0,
+                    canCompute: false,
+                    isUserDefined: true,
+                    totalWeight,
+                    defiPct,
+                    cefiPct,
+                };
+            }
+            const defiSelected = selected.filter((i) => i.category === "collateralised_lending");
+            const cefiSelected = selected.filter((i) => i.category === "cefi_savings");
+            const defiContrib = defiSelected.reduce((sum, i) => {
+                const apyNum = parseApy(i.apy);
+                return sum + (apyNum != null ? (i.weight / 100) * (apyNum / 100) : 0);
+            }, 0);
+            const cefiContrib = cefiSelected.reduce((sum, i) => {
+                const apyNum = parseApy(i.apy);
+                return sum + (apyNum != null ? (i.weight / 100) * (apyNum / 100) : 0);
+            }, 0);
+            const defiAnnualIncome = capital * defiContrib;
+            const cefiAnnualIncome = capital * cefiContrib;
+            const expectedAnnualIncome = defiAnnualIncome + cefiAnnualIncome;
+            const expectedMonthlyIncome = expectedAnnualIncome / 12;
+            const portfolioAPY = selected.reduce((sum, i) => {
+                const apyNum = parseApy(i.apy);
+                return apyNum != null ? sum + (i.weight / 100) * apyNum : sum;
+            }, 0);
+            const defiPct = defiSelected.reduce((s, i) => s + (i.weight || 0), 0);
+            const cefiPct = cefiSelected.reduce((s, i) => s + (i.weight || 0), 0);
+            const defiApyVals = defiSelected.map((i) => parseApy(i.apy)).filter((n) => n != null);
+            const cefiApyVals = cefiSelected.map((i) => parseApy(i.apy)).filter((n) => n != null);
+            const APYA_avg = defiApyVals.length > 0 ? defiApyVals.reduce((a, b) => a + b, 0) / defiApyVals.length : null;
+            const APYB_avg = cefiApyVals.length > 0 ? cefiApyVals.reduce((a, b) => a + b, 0) / cefiApyVals.length : null;
+            return {
+                APYA: APYA_avg,
+                APYB: APYB_avg,
+                portfolioAPY,
+                expectedAnnualIncome,
+                expectedMonthlyIncome,
+                defiAnnualIncome,
+                defiMonthlyIncome: defiAnnualIncome / 12,
+                cefiAnnualIncome,
+                cefiMonthlyIncome: cefiAnnualIncome / 12,
+                canCompute: true,
+                isUserDefined: true,
+                totalWeight,
+                defiPct,
+                cefiPct,
+            };
         }
 
-        setStablecoinInstruments(prev => prev.map(instr => {
-            const alloc = allocation.find(a => a.id === instr.id);
-            if (alloc) {
-                return { ...instr, selected: true, weight: alloc.weight };
-            }
-            return { ...instr, selected: false, weight: 0 };
-        }));
-    };
+        const lending = stablecoinTopProviders.collateralisedLending || [];
+        const cefi = stablecoinTopProviders.cefiSavings || [];
+        const apyAvals = lending.map((p) => parseApy(p.apy)).filter((n) => n != null);
+        const apyBvals = cefi.map((p) => parseApy(p.apy)).filter((n) => n != null);
+        const APYA = apyAvals.length > 0 ? apyAvals.reduce((a, b) => a + b, 0) / apyAvals.length : null;
+        const APYB = apyBvals.length > 0 ? apyBvals.reduce((a, b) => a + b, 0) / apyBvals.length : null;
+        const incomeA = APYA != null ? capital * 0.7 * (APYA / 100) : 0;
+        const incomeB = APYB != null ? capital * 0.3 * (APYB / 100) : 0;
+        const expectedAnnualIncome = incomeA + incomeB;
+        const expectedMonthlyIncome = expectedAnnualIncome / 12;
+        return {
+            APYA,
+            APYB,
+            portfolioAPY: null,
+            expectedAnnualIncome,
+            expectedMonthlyIncome,
+            defiAnnualIncome: incomeA,
+            defiMonthlyIncome: incomeA / 12,
+            cefiAnnualIncome: incomeB,
+            cefiMonthlyIncome: incomeB / 12,
+            canCompute: capital > 0 && (APYA != null || APYB != null),
+            isUserDefined: false,
+            totalWeight: 100,
+            defiPct: 70,
+            cefiPct: 30,
+        };
+    }, [
+        stablecoinTopProviders,
+        stablecoinPlanner.capital,
+        stablecoinPlanner.scenarioType,
+        stablecoinUserInstruments,
+    ]);
 
     return (
         <ProtectedFeature featureName="Income Planners">
@@ -1559,39 +1311,334 @@ export default function IncomePlannersPage() {
 
                 {activeTab === "fiat" && (
                     <div className="space-y-6">
-                        {/* Header */}
+                        {/* Section 1 - Header */}
                         <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
                         >
                             <div className="mb-4">
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-900 mb-2 flex items-center gap-2">
-                                    <DollarSign className="text-blue-500" size={24} />
-                                    Fiat Income Planner
+                                    <DollarSign className="text-[#f49d1d]" size={24} />
+                                    DCC – Fiat Income Planner
                                 </h3>
                                 <p className="text-sm text-slate-600 dark:text-slate-600">
-                                    Plan a target FIAT income stream using BTC-linked income wrappers, manager products, and corporate/structured issuances. Risk-first approach with conditional language (estimates only).
+                                    Design and evaluate digital credit yield strategies using market-traded instruments such as bonds, preferred shares, and income-focused ETFs. Data sourced from Admin Fiat Income. Same methodology as Stable Income Planner.
                                 </p>
                             </div>
                         </div>
 
-                        {/* Inputs Section */}
+                        {/* Inputs */}
                         <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
                         >
-                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">User inputs</h4>
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Inputs</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Capital Amount (USD)</label>
+                                    <input
+                                        type="number"
+                                        value={fiatPlanner.capital}
+                                        onChange={(e) => handleFiatPlannerChange("capital", e.target.value)}
+                                        min="0"
+                                        step="1000"
+                                        placeholder="100000"
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Duration (months)</label>
+                                    <input
+                                        type="number"
+                                        value={fiatPlanner.durationMonths}
+                                        onChange={(e) => handleFiatPlannerChange("durationMonths", parseInt(e.target.value) || 12)}
+                                        min="1"
+                                        max="120"
+                                        placeholder="12"
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Scenario Type</label>
+                                    <select
+                                        value={fiatPlanner.scenarioType}
+                                        onChange={(e) => handleFiatPlannerChange("scenarioType", e.target.value)}
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                    >
+                                        <option value="Modelled">Modelled Scenario</option>
+                                        <option value="User defined">User defined</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Modelled Scenario */}
+                        {fiatPlanner.scenarioType === "Modelled" && (
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers</h4>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={fetchFiatTopProviders}
+                                    disabled={fiatTopProvidersLoading || fiatProvidersCached}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-[#f49d1d] text-white hover:bg-[#d6891a] disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2"
+                                >
+                                    <RefreshCw size={18} className={fiatTopProvidersLoading ? "animate-spin" : ""} />
+                                    {fiatTopProvidersLoading ? "Selecting..." : "Select top providers"}
+                                </button>
+                                {fiatProvidersCached && !fiatTopProvidersLoading && (
+                                    <span className="text-xs text-slate-500 dark:text-slate-500">Cached for 24h – refresh tomorrow</span>
+                                )}
+                            </div>
+                            {fiatTopProvidersError && <p className="mt-2 text-sm text-red-600">{fiatTopProvidersError}</p>}
+                            {fiatTopProviders?.length === 0 && !fiatTopProvidersLoading && (
+                                <p className="mt-4 text-sm text-slate-500">No products in database. Admin can populate via Generate from ChatGPT in Admin &gt; Fiat Income.</p>
+                            )}
+                            <div className="mt-6">
+                                <div className="rounded-xl border border-[#f49d1d]/40 dark:border-[#f49d1d]/40 bg-gradient-to-br from-[#f49d1d]/5 to-white dark:from-[#f49d1d]/10 dark:to-slate-50/50 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-[#f49d1d]/10 dark:bg-[#f49d1d]/20 border-b border-[#f49d1d]/30">
+                                        <Activity className="text-[#f49d1d]" size={18} />
+                                        <h5 className="text-base font-semibold text-slate-800 dark:text-slate-800">Top Digital Credit Instruments</h5>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 dark:divide-slate-200/30">
+                                        {(fiatTopProviders || []).length > 0 ? (
+                                            <>
+                                            <div className="flex items-center gap-3 px-4 py-2 text-xs font-medium text-slate-500 dark:text-slate-500 border-b border-slate-100">
+                                                <span className="w-6 shrink-0" />
+                                                <div className="min-w-0 flex-1" />
+                                                <span className="shrink-0 tabular-nums w-24 text-right">APY</span>
+                                                <span className="shrink-0 tabular-nums w-10 text-right">Score</span>
+                                            </div>
+                                            {(fiatTopProviders || []).map((p, idx) => (
+                                                <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f49d1d]/5 transition-colors">
+                                                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#f49d1d]/20 text-[#f49d1d] text-xs font-bold shrink-0">{idx + 1}</span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-900 truncate">{p.issuer || "—"}</p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">{p.product || "—"} {p.ticker ? `(${p.ticker})` : ""}</p>
+                                                    </div>
+                                                    <span className="text-sm font-bold text-[#f49d1d] shrink-0 tabular-nums w-24 text-right">{p.apyDistribution || "—"}</span>
+                                                    {p.qualityScore != null ? (
+                                                        <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-10 text-right" title={formatScoreBreakdownTooltip(p.qualityScoreBreakdown)}>{p.qualityScore}/100</span>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400 shrink-0 w-10 text-right">—</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            </>
+                                        ) : (
+                                            <div className="px-4 py-8 text-center">
+                                                <Activity className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
+                                                <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
+                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        )}
+
+                        {/* User defined */}
+                        {fiatPlanner.scenarioType === "User defined" && (
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">User Defined – Select Instruments</h4>
+                            <p className="text-sm text-slate-600 dark:text-slate-600 mb-4">Select instruments and set allocation weights. Total must equal 100%.</p>
+                            {fiatUserInstrumentsLoading ? (
+                                <p className="text-sm text-slate-500 py-6">Loading products...</p>
+                            ) : fiatUserInstruments.length === 0 ? (
+                                <p className="text-sm text-slate-500 py-6">No products in database. Admin can populate via Generate from ChatGPT in Admin &gt; Fiat Income.</p>
+                            ) : (
+                                <>
+                                <div className="rounded-xl border border-[#f49d1d]/40 dark:border-[#f49d1d]/40 bg-[#f49d1d]/5 dark:bg-[#f49d1d]/10 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-500 border-b border-slate-100">
+                                        <span className="w-4 shrink-0" />
+                                        <div className="min-w-0 flex-1" />
+                                        <span className="shrink-0 w-24 text-right">APY</span>
+                                        <span className="shrink-0 w-12 text-right">Score</span>
+                                        <span className="w-16 text-right">%</span>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+                                        {fiatUserInstruments.map((i) => (
+                                            <div key={i.id} className="flex items-center gap-2 px-4 py-2 hover:bg-[#f49d1d]/5">
+                                                <input type="checkbox" checked={!!i.selected} onChange={() => handleFiatInstrumentToggle(i.id)} className="rounded border-slate-300 text-[#f49d1d] focus:ring-[#f49d1d]" />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-medium text-slate-900 truncate">{i.issuer}</p>
+                                                    <p className="text-xs text-slate-500 truncate">{i.product} {i.ticker ? `(${i.ticker})` : ""}</p>
+                                                </div>
+                                                <span className="text-xs text-slate-600 tabular-nums shrink-0 w-24 text-right">{i.apyDistribution || "—"}</span>
+                                                {i.qualityScore != null ? (
+                                                    <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-12 text-right" title={formatScoreBreakdownTooltip(i.qualityScoreBreakdown)}>{i.qualityScore}/100</span>
+                                                ) : (
+                                                    <span className="text-xs text-slate-400 shrink-0 w-12 text-right">—</span>
+                                                )}
+                                                <input type="number" min="0" max="100" step="0.5" value={i.selected ? (i.weight || "") : ""} onChange={(e) => handleFiatWeightChange(i.id, e.target.value)} disabled={!i.selected} placeholder="%" className="w-16 px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-2 focus:ring-[#f49d1d] disabled:opacity-50 disabled:bg-slate-50" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <p className={`mt-3 text-sm font-medium ${Math.abs((fiatIncomeCalc?.totalWeight ?? 0) - 100) < 0.01 ? "text-emerald-600" : "text-amber-600"}`}>
+                                    Total: {Math.round((fiatIncomeCalc?.totalWeight ?? 0) * 10) / 10}%{Math.abs((fiatIncomeCalc?.totalWeight ?? 0) - 100) >= 0.01 ? " (must equal 100%)" : ""}
+                                </p>
+                                </>
+                            )}
+                        </div>
+                        )}
+
+                        {/* Income Projection */}
+                        <div className="rounded-xl border border-slate-200/50 dark:border-slate-800/40 overflow-hidden bg-white dark:bg-white"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <div className="flex items-center gap-2 px-5 py-4 bg-gradient-to-r from-[#f49d1d]/10 to-amber-50/50 dark:from-[#f49d1d]/15 dark:to-amber-950/20 border-b border-slate-100">
+                                <TrendingUp className="text-[#f49d1d]" size={20} />
+                                <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900">Income Projection</h4>
+                            </div>
+                            <div className="p-5 md:p-6">
+                                {fiatIncomeCalc?.canCompute ? (
+                                    <>
+                                        <div className="mb-6">
+                                            <div className="flex h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-200">
+                                                <div className="h-full bg-[#f49d1d]" style={{ width: "100%" }} title="Portfolio" />
+                                            </div>
+                                            <div className="mt-1.5 text-xs text-slate-500 dark:text-slate-500">100% Portfolio</div>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+                                            <div className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/20 px-4 py-3">
+                                                <Percent className="text-[#f49d1d] shrink-0" size={20} />
+                                                <div>
+                                                    <p className="text-xs font-medium text-slate-600 dark:text-slate-500">Portfolio APY</p>
+                                                    <p className="text-lg font-bold text-slate-900 dark:text-slate-900 tabular-nums">{fiatIncomeCalc.portfolioAPY != null ? `${fiatIncomeCalc.portfolioAPY.toFixed(2)}%` : "—"}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-xl bg-[#f49d1d]/10 dark:bg-[#f49d1d]/15 border border-[#f49d1d]/30 p-4">
+                                            <p className="text-xs font-semibold text-[#b8720b] dark:text-[#f5b84d] mb-1">Total</p>
+                                            <div className="flex flex-wrap gap-6">
+                                                <div>
+                                                    <p className="text-xs text-slate-600 dark:text-slate-500">Expected yearly income</p>
+                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">${(fiatIncomeCalc.expectedAnnualIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-slate-600 dark:text-slate-500">Expected monthly income</p>
+                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">${(fiatIncomeCalc.expectedMonthlyIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-sm text-slate-500 py-4">Enter capital and select providers to see income projection.</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Saved scenarios */}
+                        {fiatPlannerSaves.length > 0 && (
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Saved Scenarios</h4>
+                            {fiatSaveMessage && <p className="text-sm text-emerald-600 mb-2">{fiatSaveMessage}</p>}
+                            <div className="flex gap-2 mb-4">
+                                <button type="button" onClick={saveFiatPlannerOutput} disabled={!fiatIncomeCalc?.canCompute} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f49d1d] text-white font-medium hover:bg-[#d6891a] disabled:opacity-50">
+                                    <Save size={16} /> Save current scenario
+                                </button>
+                            </div>
+                            <ul className="space-y-2">
+                                {fiatPlannerSaves.map((save) => {
+                                    const out = save.outputs;
+                                    const summaryStr = out ? `APY ${out.portfolioAPY?.toFixed(1) ?? "—"}% · $${(out.expectedAnnualIncome ?? 0).toLocaleString()}/yr` : "—";
+                                    return (
+                                        <li key={save.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 dark:bg-slate-900/20 border border-slate-100 dark:border-slate-800">
+                                            <div>
+                                                <span className="text-xs text-slate-500 dark:text-slate-500">{new Date(save.createdAt).toLocaleDateString()}</span>
+                                                <span className="text-sm text-slate-700 dark:text-slate-700 ml-2">{summaryStr}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {fiatDeleteConfirmId === save.id ? (
+                                                    <>
+                                                        <button type="button" onClick={() => setFiatDeleteConfirmId(null)} className="inline-flex gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</button>
+                                                        <button type="button" onClick={() => deleteFiatPlannerSave(save.id)} className="inline-flex gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50">Delete</button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <button type="button" onClick={() => recallFiatPlannerSave(save)} className="inline-flex gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-[#f49d1d] text-[#f49d1d] hover:bg-[#f49d1d] hover:text-white">Recall</button>
+                                                        <button type="button" onClick={() => setFiatDeleteConfirmId(save.id)} className="inline-flex p-1.5 text-slate-400 hover:text-red-600 rounded" title="Delete"><Trash2 size={16} /></button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                        )}
+                    </div>
+                )}
+
+                {activeTab === "stablecoin" && (
+                    <div className="space-y-6">
+                        {/* Section 1 - Purpose / Header (same as BTC) */}
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <div className="mb-4">
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-900 mb-2 flex items-center gap-2">
+                                    <CircleDollarSign className="text-[#f49d1d]" size={24} />
+                                    DCC – Stable Income Planner
+                                </h3>
+                                <p className="text-sm text-slate-600 dark:text-slate-600">
+                                    Design, compare, and evaluate stablecoin-based income strategies using a risk-first, structure-first methodology. Focuses on two crypto-native income structures: CeFi stablecoin savings and on-chain overcollateralized lending (DeFi). Surfaces the trade-off between yield, risk, and duration.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Inputs Section (same structure as BTC) */}
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Inputs</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Capital (USD)
+                                        Capital Amount (USD)
                                     </label>
                                     <input
                                         type="number"
-                                        value={fiatPlanner.capital === "" ? "" : fiatPlanner.capital}
-                                        onChange={(e) => handleFiatPlannerChange("capital", e.target.value === "" ? "" : Number(e.target.value))}
+                                        value={stablecoinPlanner.capital}
+                                        onChange={(e) => handleStablecoinPlannerChange("capital", e.target.value)}
+                                        min="0"
+                                        step="1000"
                                         placeholder="100000"
-                                        min={0}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
                                     />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
+                                        Base Stablecoin
+                                    </label>
+                                    <div className="flex gap-6 pt-2">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="baseStablecoin"
+                                                checked={stablecoinPlanner.baseStablecoin === "USDC"}
+                                                onChange={() => handleStablecoinPlannerChange("baseStablecoin", "USDC")}
+                                                className="text-[#f49d1d] focus:ring-[#f49d1d]"
+                                            />
+                                            <span className="text-slate-700 dark:text-slate-700">USDC</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="baseStablecoin"
+                                                checked={stablecoinPlanner.baseStablecoin === "USDT"}
+                                                onChange={() => handleStablecoinPlannerChange("baseStablecoin", "USDT")}
+                                                className="text-[#f49d1d] focus:ring-[#f49d1d]"
+                                            />
+                                            <span className="text-slate-700 dark:text-slate-700">USDT</span>
+                                        </label>
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
@@ -1599,900 +1646,455 @@ export default function IncomePlannersPage() {
                                     </label>
                                     <input
                                         type="number"
-                                        value={fiatPlanner.durationMonths ?? 12}
-                                        onChange={(e) => handleFiatPlannerChange("durationMonths", e.target.value === "" ? "" : parseInt(e.target.value, 10) || 12)}
+                                        value={stablecoinPlanner.durationMonths}
+                                        onChange={(e) => handleStablecoinPlannerChange("durationMonths", parseInt(e.target.value) || 12)}
+                                        min="1"
+                                        max="120"
                                         placeholder="12"
-                                        min={1}
-                                        max={120}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
                                     />
                                 </div>
-                                <div className="md:col-span-2">
+                                <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Allocation mode
+                                        Scenario Type
                                     </label>
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                handleFiatPlannerChange("mode", "Guided");
-                                                if (fiatPlanner.mode !== "Guided") {
-                                                    setTimeout(applyGuidedAllocation, 100);
-                                                }
-                                            }}
-                                            className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
-                                                fiatPlanner.mode === "Guided"
-                                                    ? "bg-blue-500 text-white"
-                                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                            }`}
-                                        >
-                                            Guided
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleFiatPlannerChange("mode", "Custom")}
-                                            className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
-                                                fiatPlanner.mode === "Custom"
-                                                    ? "bg-blue-500 text-white"
-                                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                            }`}
-                                        >
-                                            Custom
-                                        </button>
-                                    </div>
+                                    <select
+                                        value={stablecoinPlanner.scenarioType}
+                                        onChange={(e) => handleStablecoinPlannerChange("scenarioType", e.target.value)}
+                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-[#f49d1d] focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
+                                    >
+                                        <option value="Modelled">Modelled Scenario</option>
+                                        <option value="User defined">User defined</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Instrument Selection */}
-                        {fiatPlanner.mode === "Custom" && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/40 dark:border-slate-800/40 p-6 md:p-8 shadow-sm overflow-hidden"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.03)' }}
-                            >
-                                <div className="mb-6 pb-4 border-b-2 border-slate-200">
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-1 flex items-center gap-2">
-                                        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-100 text-blue-600">
-                                            <Wallet size={22} />
-                                        </span>
-                                        Choose providers and allocate investments
-                                    </h4>
-                                    <p className="text-sm text-slate-600 dark:text-slate-600 flex items-center gap-1.5 mt-2">
-                                        <Percent size={14} className="text-emerald-500" />
-                                        Total allocation must equal <span className="font-semibold text-emerald-700">100%</span>.
-                                    </p>
-                                </div>
-                                {fiatInstrumentsLoading ? (
-                                    <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-                                        <RefreshCw size={32} className="animate-spin text-blue-500 mb-3" />
-                                        <p>Loading providers…</p>
-                                    </div>
-                                ) : fiatInstruments.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-12 px-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center">
-                                        <Wallet size={40} className="text-slate-300 mb-3" />
-                                        <p className="text-slate-600 font-medium">No providers yet</p>
-                                        <p className="text-sm text-slate-500 mt-1">Add some in Admin → Crypto Lending Providers or use Load top 20 from ChatGPT.</p>
-                                    </div>
-                                ) : (
-                                <div className="space-y-3">
-                                    {fiatInstruments.map((instr) => {
-                                        const scoreInfo = fiatScoredRanking.find((s) => s.id === instr.id);
-                                        const isSelected = instr.selected;
-                                        return (
-                                        <div
-                                            key={instr.id}
-                                            className={`rounded-xl border-2 p-4 transition-all duration-200 ${
-                                                isSelected
-                                                    ? "border-blue-300 bg-blue-50/50 dark:bg-blue-50/20 shadow-sm"
-                                                    : "border-slate-200 bg-slate-50/30 hover:border-slate-300 hover:bg-slate-50/50"
-                                            }`}
-                                        >
-                                            <div className="flex items-start gap-4">
-                                                <label className="flex-shrink-0 mt-1 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={() => handleInstrumentToggle(instr.id)}
-                                                        className="w-5 h-5 rounded border-2 border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                                                    />
-                                                </label>
-                                                <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
-                                                    <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-200/80 text-slate-600 flex-shrink-0">
-                                                        <Wallet size={18} />
-                                                    </span>
-                                                    <h5 className="font-semibold text-slate-900 dark:text-slate-900">{instr.name}</h5>
-                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200/60 text-xs font-medium tabular-nums">
-                                                        <Percent size={11} className="text-emerald-600" />
-                                                        {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}
-                                                    </span>
-                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200/60 text-xs font-medium tabular-nums">
-                                                        <Activity size={11} className="text-amber-600" />
-                                                        HV30: {instr.hv30Pct != null ? `${Number(instr.hv30Pct).toFixed(1)}%` : "—"}
-                                                    </span>
-                                                    <span className="text-xs text-slate-500">{instr.type}</span>
-                                                    {scoreInfo != null && (
-                                                        <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[11px] font-medium">
-                                                            <Award size={10} /> {scoreInfo.final_score.toFixed(2)}
-                                                        </span>
-                                                    )}
-                                                    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 bg-sky-50 text-sky-800 border border-sky-200/60 text-xs">
-                                                        <Droplets size={11} className="text-sky-600" />
-                                                        {instr.liquidity}
-                                                    </span>
-                                                    {isSelected && (
-                                                        <div className="flex items-center gap-1 ml-auto bg-white rounded-lg border-2 border-blue-200 px-3 py-1.5 shadow-sm">
-                                                            <input
-                                                                type="number"
-                                                                min="0"
-                                                                max="100"
-                                                                value={instr.weight}
-                                                                onChange={(e) => handleWeightChange(instr.id, e.target.value)}
-                                                                className="w-14 text-center text-lg font-bold text-slate-900 bg-transparent border-0 focus:ring-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                            />
-                                                            <span className="text-sm font-semibold text-blue-600">%</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );})}
-                                    {(() => {
-                                        const total = fiatInstruments.filter(i => i.selected).reduce((sum, i) => sum + (i.weight || 0), 0);
-                                        const isComplete = Math.abs(total - 100) < 0.01;
-                                        return (
-                                    <div className={`mt-4 flex flex-wrap items-center gap-3 rounded-xl border-2 px-4 py-3 ${isComplete ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-50/30" : "border-amber-200 bg-amber-50/50 dark:bg-amber-50/20"}`}>
-                                        <span className={`flex items-center gap-2 font-semibold ${isComplete ? "text-emerald-800" : "text-amber-800"}`}>
-                                            {isComplete ? (
-                                                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-200 text-emerald-800">
-                                                    <Percent size={16} />
-                                                </span>
-                                            ) : (
-                                                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-200 text-amber-800">
-                                                    <AlertTriangle size={16} />
-                                                </span>
-                                            )}
-                                            Total weight: <span className="tabular-nums">{total.toFixed(1)}%</span>
-                                        </span>
-                                        {!isComplete && (
-                                            <span className="text-sm text-amber-700">Must be 100% to show results</span>
-                                        )}
-                                    </div>
-                                    );})()}
-                                </div>
+                        {/* Section 3 - Modelled Scenario or User defined */}
+                        {stablecoinPlanner.scenarioType === "Modelled" && (
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers</h4>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={fetchStablecoinTopProviders}
+                                    disabled={stablecoinTopProvidersLoading || stablecoinProvidersCached}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-[#f49d1d] text-white hover:bg-[#d6891a] disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2"
+                                >
+                                    <RefreshCw size={18} className={stablecoinTopProvidersLoading ? "animate-spin" : ""} />
+                                    {stablecoinTopProvidersLoading ? "Selecting..." : "Select top providers"}
+                                </button>
+                                {stablecoinProvidersCached && !stablecoinTopProvidersLoading && (
+                                    <span className="text-xs text-slate-500 dark:text-slate-500">Cached for 24h – refresh tomorrow</span>
                                 )}
                             </div>
-                        )}
-
-                        {/* Top 5 providers by final_score (both modes) */}
-                        {fiatTop5.length > 0 && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                            >
-                                <div className="flex items-center justify-between mb-3">
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-2">
-                                        <Award size={20} className="text-amber-500" /> Top 5 providers (score)
-                                    </h4>
-                                    <p className="text-xs text-slate-500 flex items-center gap-1">
-                                        <TrendingUp size={12} /> Ranked by final score (APY / HV30 / liquidity)
-                                    </p>
-                                </div>
-                                <div className="overflow-x-auto rounded-xl border border-slate-200/60 bg-gradient-to-b from-slate-50/80 to-white shadow-inner">
-                                    <table className="min-w-full text-xs md:text-sm">
-                                        <thead>
-                                            <tr className="border-b-2 border-slate-200 bg-slate-100/70 text-slate-700 dark:text-slate-700 text-left">
-                                                <th className="py-2.5 pr-3 font-semibold w-12 text-center">
-                                                    <span className="inline-flex items-center justify-center gap-1"><Trophy size={14} className="text-amber-500" /> #</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold">
-                                                    <span className="inline-flex items-center gap-1.5"><Wallet size={14} className="text-blue-600" /> Provider</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold">Jurisdiction</th>
-                                                <th className="py-2.5 pr-4 font-semibold">
-                                                    <span className="inline-flex items-center gap-1.5"><Percent size={14} className="text-emerald-600" /> APY</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold">
-                                                    <span className="inline-flex items-center gap-1.5"><Activity size={14} className="text-amber-600" /> HV30</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold">
-                                                    <span className="inline-flex items-center gap-1.5"><Droplets size={14} className="text-sky-600" /> Liquidity</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold">
-                                                    <span className="inline-flex items-center gap-1.5"><Award size={14} className="text-emerald-600" /> Score</span>
-                                                </th>
-                                                <th className="py-2.5 pr-4 font-semibold hidden md:table-cell">
-                                                    <span className="inline-flex items-center gap-1.5"><DollarSign size={14} className="text-green-600" /> Income</span>
-                                                </th>
-                                                <th className="py-2.5 font-semibold hidden md:table-cell">
-                                                    <span className="inline-flex items-center gap-1.5"><DollarSign size={14} className="text-green-700" /> Max</span>
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {fiatTop5.map((r, idx) => {
-                                                const annualMin = capitalForRevenue * r.apy_avg / 100;
-                                                const annualMax = capitalForRevenue * (r.apyMaxPct || r.apy_avg) / 100;
-                                                const rankBg = idx === 0 ? "bg-amber-100 text-amber-800 border-amber-200" : idx === 1 ? "bg-slate-200 text-slate-700 border-slate-300" : idx === 2 ? "bg-amber-100/80 text-amber-800 border-amber-200/80" : "bg-slate-100 text-slate-600 border-slate-200";
-                                                const hv30 = r.hv30Pct;
-                                                const hv30Color = hv30 < 12 ? "bg-emerald-100 text-emerald-800 border-emerald-200" : hv30 < 22 ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-orange-100 text-orange-800 border-orange-200";
-                                                return (
-                                                    <tr key={r.id} className="border-b border-slate-100 last:border-0 bg-white/70 hover:bg-slate-50/80 transition-colors">
-                                                        <td className="py-2.5 pr-3 text-center">
-                                                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border-2 font-bold text-sm tabular-nums ${rankBg}`} title={`Rank ${idx + 1}`}>
-                                                                {idx + 1}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                                                                    <Wallet size={14} className="text-blue-600" />
-                                                                </span>
-                                                                <div className="flex flex-col min-w-0">
-                                                                    <span className="text-slate-900 dark:text-slate-900 font-semibold">{r.name}</span>
-                                                                    <span className="text-[11px] text-slate-500">Type: {r.type || "N/A"}</span>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4 text-slate-700 dark:text-slate-700">
-                                                            {r.jurisdiction ?? "—"}
-                                                        </td>
-                                                        <td className="py-2.5 pr-4 tabular-nums">
-                                                            <span className="inline-flex items-center gap-1 rounded-lg px-2 py-1 bg-emerald-50 text-emerald-800 font-medium border border-emerald-200/60">
-                                                                <Percent size={12} className="text-emerald-600" />
-                                                                {r.apyMinPct != null && r.apyMaxPct != null
-                                                                    ? `${r.apyMinPct.toFixed(1)}% – ${r.apyMaxPct.toFixed(1)}%`
-                                                                    : r.apy_avg.toFixed(1) + "%"}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4">
-                                                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] tabular-nums font-medium border ${hv30Color}`}>
-                                                                <Activity size={11} />
-                                                                {r.hv30Pct.toFixed(1)}%
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4">
-                                                            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] capitalize font-medium bg-sky-50 text-sky-800 border border-sky-200/60">
-                                                                <Droplets size={11} className="text-sky-600" />
-                                                                {r.liquidity}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4 tabular-nums">
-                                                            <span className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] bg-emerald-100 text-emerald-800 font-bold border border-emerald-200/60">
-                                                                <Award size={12} className="text-emerald-600" />
-                                                                {r.final_score.toFixed(2)}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 pr-4 tabular-nums hidden md:table-cell">
-                                                            <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-700 font-medium">
-                                                                <DollarSign size={12} className="text-green-600" />
-                                                                ${annualMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-2.5 tabular-nums hidden md:table-cell">
-                                                            <span className="inline-flex items-center gap-1 text-green-800 dark:text-green-800 font-semibold">
-                                                                <DollarSign size={12} className="text-green-600" />
-                                                                ${annualMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Results */}
-                        {fiatResults && (
-                            <>
-                                {/* Allocation Summary — sorted by score, with income ranges */}
-                                {(() => {
-                                    const capital = Number(fiatPlanner.capital) || 0;
-                                    const sortedSelected = [...fiatResults.selected].sort((a, b) => {
-                                        const scoreA = fiatScoredRanking.find((s) => s.id === a.id)?.final_score ?? 0;
-                                        const scoreB = fiatScoredRanking.find((s) => s.id === b.id)?.final_score ?? 0;
-                                        return scoreB - scoreA;
-                                    });
-                                    const pctMin = (i) => (i.apyMinPct != null ? Number(i.apyMinPct) : (i.apyMin != null ? Number(i.apyMin) * 100 : 0));
-                                    const pctMax = (i) => (i.apyMaxPct != null ? Number(i.apyMaxPct) : (i.apyMax != null ? Number(i.apyMax) * 100 : 0));
-                                    return (
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/40 dark:border-slate-800/40 p-6 md:p-8 shadow-sm"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.03)' }}
-                                >
-                                    <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-200">
-                                        <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-2">
-                                            <LayoutList className="text-slate-600 dark:text-slate-600" size={22} />
-                                            Allocation Summary
-                                        </h4>
-                                        <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                                            <Award size={14} className="text-amber-500" />
-                                            Ranked by score • Rate as of: {new Date(fiatResults.rateAsOf).toLocaleString()}
-                                        </p>
-                                    </div>
-                                    {/* Annual & Monthly income range — prominent */}
-                                    {fiatResults.expectedIncomeMin != null && fiatResults.expectedIncomeMax != null && (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                                            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-50/80 border border-emerald-200/60 p-4">
-                                                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-800 uppercase tracking-wide mb-1 flex items-center gap-1.5">
-                                                    <Calendar size={14} /> Annual income range
-                                                </p>
-                                                <p className="text-xl font-bold text-emerald-900 dark:text-emerald-900 tabular-nums">
-                                                    ${fiatResults.expectedIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${fiatResults.expectedIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                </p>
-                                                <p className="text-xs text-emerald-600 mt-1">/ year</p>
-                                            </div>
-                                            <div className="rounded-xl bg-slate-50 dark:bg-slate-50 border border-slate-200/60 p-4">
-                                                <p className="text-xs font-medium text-slate-600 dark:text-slate-600 uppercase tracking-wide mb-1 flex items-center gap-1.5">
-                                                    <CalendarDays size={14} /> Monthly income range
-                                                </p>
-                                                <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
-                                                    ${(fiatResults.expectedIncomeMin / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${(fiatResults.expectedIncomeMax / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                </p>
-                                                <p className="text-xs text-slate-500 mt-1">/ month</p>
-                                            </div>
+                            {stablecoinTopProvidersError && (
+                                <p className="mt-2 text-sm text-red-600">{stablecoinTopProvidersError}</p>
+                            )}
+                            {stablecoinTopProviders.collateralisedLending?.length === 0 && stablecoinTopProviders.cefiSavings?.length === 0 && !stablecoinTopProvidersLoading && (
+                                <p className="mt-4 text-sm text-slate-500">No products in database. Admin can populate via Generate from ChatGPT in Admin &gt; Stablecoin.</p>
+                            )}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                                {/* Collateralised Lending (DeFi) */}
+                                <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-gradient-to-br from-emerald-50/50 to-white dark:from-emerald-950/20 dark:to-slate-50/50 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-emerald-50/80 dark:bg-emerald-900/20 border-b border-emerald-200/50">
+                                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/15">
+                                            <Activity className="text-emerald-600 dark:text-emerald-400" size={18} />
                                         </div>
-                                    )}
-                                    <div className="space-y-3">
-                                        {sortedSelected.map((instr, idx) => {
-                                            const ranking = fiatScoredRanking.find((r) => r.id === instr.id);
-                                            const finalScore = ranking?.final_score ?? 0;
-                                            const recLevel = finalScore > 1 ? "Recommended" : finalScore >= 0.7 ? "Moderate" : "Avoid";
-                                            const annualMin = capital * (instr.weight / 100) * (pctMin(instr) / 100);
-                                            const annualMax = capital * (instr.weight / 100) * (pctMax(instr) / 100);
-                                            return (
-                                            <div key={instr.id} className="rounded-xl border border-slate-200/60 bg-slate-50/50 dark:bg-slate-50/30 p-4 flex flex-wrap items-start justify-between gap-3">
-                                                <div className="flex items-start gap-3 min-w-0">
-                                                    <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-200 text-slate-700 dark:text-slate-700 font-bold text-sm flex items-center justify-center tabular-nums" title="Rank">
+                                        <h5 className="text-base font-semibold text-slate-800 dark:text-slate-800">Collateralised Lending</h5>
+                                        <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-800/40 text-emerald-700 dark:text-emerald-300">DeFi</span>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 dark:divide-slate-200/30">
+                                        {(stablecoinTopProviders.collateralisedLending || []).length > 0 ? (
+                                            <>
+                                            <div className="flex items-center gap-3 px-4 py-2 text-xs font-medium text-slate-500 dark:text-slate-500 border-b border-slate-100">
+                                                <span className="w-6 shrink-0" />
+                                                <div className="min-w-0 flex-1" />
+                                                <span className="shrink-0 tabular-nums w-12 text-right">APY</span>
+                                                <span className="shrink-0 tabular-nums w-10 text-right">Score</span>
+                                            </div>
+                                            {(stablecoinTopProviders.collateralisedLending || []).map((p, idx) => (
+                                                <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/10 transition-colors">
+                                                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-bold shrink-0">
                                                         {idx + 1}
                                                     </span>
-                                                    <div>
-                                                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                                                            <span className="font-semibold text-slate-900 dark:text-slate-900 flex items-center gap-1.5">
-                                                                <Wallet size={14} className="text-slate-500" /> {instr.name}
-                                                            </span>
-                                                            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold bg-slate-200 text-slate-700 tabular-nums">
-                                                                {instr.weight}%
-                                                            </span>
-                                                            <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs font-medium ${
-                                                                recLevel === "Recommended" ? "bg-green-100 text-green-800" :
-                                                                recLevel === "Moderate" ? "bg-blue-100 text-blue-800" :
-                                                                "bg-slate-100 text-slate-700"
-                                                            }`}>
-                                                                {recLevel}
-                                                            </span>
-                                                            <span className="text-xs text-slate-500 tabular-nums">score {finalScore.toFixed(2)}</span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-900 truncate">{p.issuer || "—"}</p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">{p.product || "—"}</p>
+                                                    </div>
+                                                    <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 shrink-0 tabular-nums w-12 text-right">{p.apy || "—"}</span>
+                                                    {p.qualityScore != null ? (
+                                                        <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-10 text-right" title={formatScoreBreakdownTooltip(p.qualityScoreBreakdown)}>{p.qualityScore}/100</span>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400 shrink-0 w-10 text-right">—</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            </>
+                                        ) : (
+                                            <div className="px-4 py-8 text-center">
+                                                <Activity className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
+                                                <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
+                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* CeFi Savings */}
+                                <div className="rounded-xl border border-blue-200/60 dark:border-blue-800/40 bg-gradient-to-br from-blue-50/50 to-white dark:from-blue-950/20 dark:to-slate-50/50 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-blue-50/80 dark:bg-blue-900/20 border-b border-blue-200/50">
+                                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/15">
+                                            <Building2 className="text-blue-600 dark:text-blue-400" size={18} />
+                                        </div>
+                                        <h5 className="text-base font-semibold text-slate-800 dark:text-slate-800">CeFi Savings</h5>
+                                        <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-800/40 text-blue-700 dark:text-blue-300">CeFi</span>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 dark:divide-slate-200/30">
+                                        {(stablecoinTopProviders.cefiSavings || []).length > 0 ? (
+                                            <>
+                                            <div className="flex items-center gap-3 px-4 py-2 text-xs font-medium text-slate-500 dark:text-slate-500 border-b border-slate-100">
+                                                <span className="w-6 shrink-0" />
+                                                <div className="min-w-0 flex-1" />
+                                                <span className="shrink-0 tabular-nums w-12 text-right">APY</span>
+                                                <span className="shrink-0 tabular-nums w-10 text-right">Score</span>
+                                            </div>
+                                            {(stablecoinTopProviders.cefiSavings || []).map((p, idx) => (
+                                                <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50/30 dark:hover:bg-blue-950/10 transition-colors">
+                                                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500/20 text-blue-700 dark:text-blue-300 text-xs font-bold shrink-0">
+                                                        {idx + 1}
+                                                    </span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-900 truncate">{p.issuer || "—"}</p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">{p.product || "—"}</p>
+                                                    </div>
+                                                    <span className="text-sm font-bold text-blue-600 dark:text-blue-400 shrink-0 tabular-nums w-12 text-right">{p.apy || "—"}</span>
+                                                    {p.qualityScore != null ? (
+                                                        <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-10 text-right" title={formatScoreBreakdownTooltip(p.qualityScoreBreakdown)}>{p.qualityScore}/100</span>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400 shrink-0 w-10 text-right">—</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            </>
+                                        ) : (
+                                            <div className="px-4 py-8 text-center">
+                                                <Building2 className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
+                                                <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
+                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        )}
+
+                        {/* User defined scenario: freely select instruments and allocations */}
+                        {stablecoinPlanner.scenarioType === "User defined" && (
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">User Defined – Select Instruments</h4>
+                            <p className="text-sm text-slate-600 dark:text-slate-600 mb-4">Select instruments and set allocation weights. Total must equal 100%.</p>
+                            {stablecoinUserInstrumentsLoading ? (
+                                <p className="text-sm text-slate-500 py-6">Loading products...</p>
+                            ) : stablecoinUserInstruments.length === 0 ? (
+                                <p className="text-sm text-slate-500 py-6">No products in database. Admin can populate via Generate from ChatGPT in Admin &gt; Stablecoin.</p>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/30 dark:bg-emerald-950/10 overflow-hidden">
+                                            <div className="px-4 py-2 bg-emerald-50/80 dark:bg-emerald-900/20 border-b border-emerald-200/50">
+                                                <h5 className="text-sm font-semibold text-slate-800">Collateralised Lending (DeFi)</h5>
+                                            </div>
+                                            <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                                                {stablecoinUserInstruments.filter((i) => i.category === "collateralised_lending").length > 0 && (
+                                                <div className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-500 border-b border-slate-100">
+                                                    <span className="w-4 shrink-0" />
+                                                    <div className="min-w-0 flex-1" />
+                                                    <span className="shrink-0 w-12 text-right">APY</span>
+                                                    <span className="shrink-0 w-12 text-right">Score</span>
+                                                    <span className="w-16 text-right">%</span>
+                                                </div>
+                                                )}
+                                                {stablecoinUserInstruments.filter((i) => i.category === "collateralised_lending").map((i) => (
+                                                    <div key={i.id} className="flex items-center gap-2 px-4 py-2 hover:bg-emerald-50/30">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!!i.selected}
+                                                            onChange={() => handleStablecoinInstrumentToggle(i.id)}
+                                                            className="rounded border-slate-300 text-[#f49d1d] focus:ring-[#f49d1d]"
+                                                        />
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-sm font-medium text-slate-900 truncate">{i.issuer}</p>
+                                                            <p className="text-xs text-slate-500 truncate">{i.product}</p>
                                                         </div>
-                                                        <p className="text-xs text-slate-500 mb-1">{instr.type} • {String(instr.liquidity || "").toLowerCase()}</p>
-                                                        <p className="text-xs text-slate-600 dark:text-slate-600 tabular-nums flex items-center gap-1">
-                                                            <Percent size={12} className="text-slate-500" />
-                                                            APY: {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : "—")}
+                                                        <span className="text-xs text-slate-600 tabular-nums shrink-0 w-12 text-right">{i.apy || "—"}</span>
+                                                        {i.qualityScore != null ? (
+                                                            <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-12 text-right" title={formatScoreBreakdownTooltip(i.qualityScoreBreakdown)}>{i.qualityScore}/100</span>
+                                                        ) : (
+                                                            <span className="text-xs text-slate-400 shrink-0 w-12 text-right">—</span>
+                                                        )}
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            max="100"
+                                                            step="0.5"
+                                                            value={i.selected ? (i.weight || "") : ""}
+                                                            onChange={(e) => handleStablecoinWeightChange(i.id, e.target.value)}
+                                                            disabled={!i.selected}
+                                                            placeholder="%"
+                                                            className="w-16 px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-2 focus:ring-[#f49d1d] disabled:opacity-50 disabled:bg-slate-50"
+                                                        />
+                                                    </div>
+                                                ))}
+                                                {stablecoinUserInstruments.filter((i) => i.category === "collateralised_lending").length === 0 && (
+                                                    <div className="px-4 py-6 text-center text-sm text-slate-500">No DeFi products</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-xl border border-blue-200/60 dark:border-blue-800/40 bg-blue-50/30 dark:bg-blue-950/10 overflow-hidden">
+                                            <div className="px-4 py-2 bg-blue-50/80 dark:bg-blue-900/20 border-b border-blue-200/50">
+                                                <h5 className="text-sm font-semibold text-slate-800">CeFi Savings</h5>
+                                            </div>
+                                            <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                                                {stablecoinUserInstruments.filter((i) => i.category === "cefi_savings").length > 0 && (
+                                                <div className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-500 border-b border-slate-100">
+                                                    <span className="w-4 shrink-0" />
+                                                    <div className="min-w-0 flex-1" />
+                                                    <span className="shrink-0 w-12 text-right">APY</span>
+                                                    <span className="shrink-0 w-12 text-right">Score</span>
+                                                    <span className="w-16 text-right">%</span>
+                                                </div>
+                                                )}
+                                                {stablecoinUserInstruments.filter((i) => i.category === "cefi_savings").map((i) => (
+                                                    <div key={i.id} className="flex items-center gap-2 px-4 py-2 hover:bg-blue-50/30">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!!i.selected}
+                                                            onChange={() => handleStablecoinInstrumentToggle(i.id)}
+                                                            className="rounded border-slate-300 text-[#f49d1d] focus:ring-[#f49d1d]"
+                                                        />
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-sm font-medium text-slate-900 truncate">{i.issuer}</p>
+                                                            <p className="text-xs text-slate-500 truncate">{i.product}</p>
+                                                        </div>
+                                                        <span className="text-xs text-slate-600 tabular-nums shrink-0 w-12 text-right">{i.apy || "—"}</span>
+                                                        {i.qualityScore != null ? (
+                                                            <span className="text-xs font-medium text-slate-600 shrink-0 tabular-nums w-12 text-right" title={formatScoreBreakdownTooltip(i.qualityScoreBreakdown)}>{i.qualityScore}/100</span>
+                                                        ) : (
+                                                            <span className="text-xs text-slate-400 shrink-0 w-12 text-right">—</span>
+                                                        )}
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            max="100"
+                                                            step="0.5"
+                                                            value={i.selected ? (i.weight || "") : ""}
+                                                            onChange={(e) => handleStablecoinWeightChange(i.id, e.target.value)}
+                                                            disabled={!i.selected}
+                                                            placeholder="%"
+                                                            className="w-16 px-2 py-1 text-sm text-right border border-slate-300 rounded focus:ring-2 focus:ring-[#f49d1d] disabled:opacity-50 disabled:bg-slate-50"
+                                                        />
+                                                    </div>
+                                                ))}
+                                                {stablecoinUserInstruments.filter((i) => i.category === "cefi_savings").length === 0 && (
+                                                    <div className="px-4 py-6 text-center text-sm text-slate-500">No CeFi products</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className={`mt-3 text-sm font-medium ${Math.abs((stablecoinIncomeCalc?.totalWeight ?? 0) - 100) < 0.01 ? "text-emerald-600" : "text-amber-600"}`}>
+                                        Total: {Math.round((stablecoinIncomeCalc?.totalWeight ?? 0) * 10) / 10}%{Math.abs((stablecoinIncomeCalc?.totalWeight ?? 0) - 100) >= 0.01 ? " (must equal 100%)" : ""}
+                                    </p>
+                                </>
+                            )}
+                        </div>
+                        )}
+
+                        {/* Section 4 - Income Projection */}
+                        <div className="rounded-xl border border-slate-200/50 dark:border-slate-800/40 overflow-hidden bg-white dark:bg-white"
+                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
+                        >
+                            <div className="flex items-center gap-2 px-5 py-4 bg-gradient-to-r from-[#f49d1d]/10 to-amber-50/50 dark:from-[#f49d1d]/15 dark:to-amber-950/20 border-b border-slate-100">
+                                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#f49d1d]/20">
+                                    <TrendingUp className="text-[#f49d1d]" size={20} />
+                                </div>
+                                <div>
+                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900">Income Projection</h4>
+                                    <p className="text-xs text-slate-500 dark:text-slate-500">
+                                        {stablecoinIncomeCalc?.isUserDefined
+                                            ? `${Math.round(stablecoinIncomeCalc.defiPct || 0)}% DeFi · ${Math.round(stablecoinIncomeCalc.cefiPct || 0)}% CeFi`
+                                            : "70% Collateralised Lending · 30% CeFi Savings"}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="p-5 md:p-6">
+                                {stablecoinIncomeCalc.canCompute ? (
+                                    <>
+                                        {/* Allocation bar (dynamic for User defined) */}
+                                        <div className="mb-6">
+                                            <div className="flex h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-200">
+                                                <div className="h-full bg-emerald-500" style={{ width: `${stablecoinIncomeCalc.defiPct ?? 70}%` }} title="Collateralised Lending" />
+                                                <div className="h-full bg-blue-500" style={{ width: `${stablecoinIncomeCalc.cefiPct ?? 30}%` }} title="CeFi Savings" />
+                                            </div>
+                                            <div className="flex justify-between mt-1.5 text-xs text-slate-500 dark:text-slate-500">
+                                                <span>{Math.round(stablecoinIncomeCalc.defiPct ?? 70)}% DeFi</span>
+                                                <span>{Math.round(stablecoinIncomeCalc.cefiPct ?? 30)}% CeFi</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Input rates: APYA/APYB (Modelled) or avg DeFi / avg CeFi + Portfolio APY (User defined) */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
+                                            {stablecoinIncomeCalc.isUserDefined ? (
+                                                <>
+                                                    <div className="flex items-center gap-3 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/40 dark:bg-emerald-950/20 px-4 py-3">
+                                                        <Percent className="text-emerald-600 dark:text-emerald-400 shrink-0" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-medium text-slate-600 dark:text-slate-500">Avg DeFi APY</p>
+                                                            <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                                                                {stablecoinIncomeCalc.APYA != null ? `${stablecoinIncomeCalc.APYA.toFixed(2)}%` : "—"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 rounded-lg border border-blue-200/60 dark:border-blue-800/40 bg-blue-50/40 dark:bg-blue-950/20 px-4 py-3">
+                                                        <Percent className="text-blue-600 dark:text-blue-400 shrink-0" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-medium text-slate-600 dark:text-slate-500">Avg CeFi APY</p>
+                                                            <p className="text-lg font-bold text-blue-700 dark:text-blue-300 tabular-nums">
+                                                                {stablecoinIncomeCalc.APYB != null ? `${stablecoinIncomeCalc.APYB.toFixed(2)}%` : "—"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/20 px-4 py-3">
+                                                        <Percent className="text-[#f49d1d] shrink-0" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-medium text-slate-600 dark:text-slate-500">Portfolio APY</p>
+                                                            <p className="text-lg font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                                {stablecoinIncomeCalc.portfolioAPY != null ? `${stablecoinIncomeCalc.portfolioAPY.toFixed(2)}%` : "—"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className="flex items-center gap-3 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/40 dark:bg-emerald-950/20 px-4 py-3">
+                                                        <Percent className="text-emerald-600 dark:text-emerald-400 shrink-0" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-medium text-slate-600 dark:text-slate-500">APYA · DeFi avg</p>
+                                                            <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                                                                {stablecoinIncomeCalc.APYA != null ? `${stablecoinIncomeCalc.APYA.toFixed(2)}%` : "—"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 rounded-lg border border-blue-200/60 dark:border-blue-800/40 bg-blue-50/40 dark:bg-blue-950/20 px-4 py-3">
+                                                        <Percent className="text-blue-600 dark:text-blue-400 shrink-0" size={20} />
+                                                        <div>
+                                                            <p className="text-xs font-medium text-slate-600 dark:text-slate-500">APYB · CeFi avg</p>
+                                                            <p className="text-lg font-bold text-blue-700 dark:text-blue-300 tabular-nums">
+                                                                {stablecoinIncomeCalc.APYB != null ? `${stablecoinIncomeCalc.APYB.toFixed(2)}%` : "—"}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* Main results: DeFi and CeFi yearly/monthly income */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/30 dark:bg-emerald-950/20 p-5">
+                                                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-3">DeFi · Collateralised Lending</p>
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-500">Expected yearly income</p>
+                                                        <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                            ${(stablecoinIncomeCalc.defiAnnualIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-500">Expected monthly income</p>
+                                                        <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                            ${(stablecoinIncomeCalc.defiMonthlyIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <div className="flex flex-col items-end text-right flex-shrink-0">
-                                                    <p className="text-xs text-slate-500 mb-0.5 flex items-center gap-1">
-                                                        <DollarSign size={12} /> Est. income (this provider)
+                                            </div>
+                                            <div className="rounded-xl border border-blue-200/60 dark:border-blue-800/40 bg-blue-50/30 dark:bg-blue-950/20 p-5">
+                                                <p className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-400 mb-3">CeFi · Savings</p>
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-500">Expected yearly income</p>
+                                                        <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                            ${(stablecoinIncomeCalc.cefiAnnualIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-500">Expected monthly income</p>
+                                                        <p className="text-xl font-bold text-slate-900 dark:text-slate-900 tabular-nums">
+                                                            ${(stablecoinIncomeCalc.cefiMonthlyIncome ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-4 rounded-xl bg-[#f49d1d]/10 dark:bg-[#f49d1d]/15 border border-[#f49d1d]/30 p-4">
+                                            <p className="text-xs font-semibold text-[#b8720b] dark:text-[#f5b84d] mb-1">Total</p>
+                                            <div className="flex flex-wrap gap-6">
+                                                <div>
+                                                    <p className="text-xs text-slate-600">Annual</p>
+                                                    <p className="text-lg font-bold text-slate-900 tabular-nums">
+                                                        ${stablecoinIncomeCalc.expectedAnnualIncome.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </p>
-                                                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-900 tabular-nums">
-                                                        ${annualMin.toLocaleString('en-US', { maximumFractionDigits: 0 })} – ${annualMax.toLocaleString('en-US', { maximumFractionDigits: 0 })}/yr
-                                                    </p>
-                                                    <p className="text-xs text-slate-500 tabular-nums">
-                                                        ${(annualMin / 12).toLocaleString('en-US', { maximumFractionDigits: 0 })} – ${(annualMax / 12).toLocaleString('en-US', { maximumFractionDigits: 0 })}/mo
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-slate-600">Monthly</p>
+                                                    <p className="text-lg font-bold text-slate-900 tabular-nums">
+                                                        ${stablecoinIncomeCalc.expectedMonthlyIncome.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </p>
                                                 </div>
                                             </div>
-                                        );})}
-                                    </div>
-                                </div>
-                                    );
-                                })()}
-
-                                {/* Expected results (Guided: allocation across 3 providers; Custom: chosen allocation) */}
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                                >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4 flex items-center gap-2">
-                                        <TrendingUp size={20} className="text-slate-600" />
-                                        {fiatPlanner.mode === "Guided" ? "Expected results with allocation across 3 providers" : "Expected results"}
-                                    </h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
-                                                <Percent size={14} /> Portfolio APY (min – max)
-                                            </p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                {fiatResults.portfolioApyMin.toFixed(1)}% – {fiatResults.portfolioApyMax.toFixed(1)}%
-                                            </p>
-                                            <p className="text-xs text-slate-500 mt-1">As of: {new Date(fiatResults.rateAsOf).toLocaleDateString()}</p>
                                         </div>
-                                        {fiatResults.expectedIncomeMin != null && (
-                                            <>
-                                                <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                                    <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
-                                                        <Calendar size={14} /> Annual income range
-                                                    </p>
-                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                        ${fiatResults.expectedIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${fiatResults.expectedIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                    </p>
-                                                    <p className="text-xs text-slate-500 mt-1">/ year</p>
-                                                </div>
-                                                <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                                    <p className="text-xs text-slate-600 dark:text-slate-600 mb-1 flex items-center gap-1.5">
-                                                        <CalendarDays size={14} /> Monthly income range
-                                                    </p>
-                                                    <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                        ${(fiatResults.expectedIncomeMin / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} – ${(fiatResults.expectedIncomeMax / 12).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                                                    </p>
-                                                    <p className="text-xs text-slate-500 mt-1">/ month</p>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
 
-                            </>
-                        )}
-
-                        {/* Save and recall scenario (like BTC Income Planner) */}
-                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
-                        >
-                            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-900 mb-3">Save and recall a scenario</h4>
-                            <div className="flex flex-wrap items-center gap-2 mb-4">
-                                <button
-                                    type="button"
-                                    onClick={saveFiatPlannerOutput}
-                                    disabled={!fiatResults}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                                >
-                                    <Save size={16} />
-                                    Save results
-                                </button>
-                                {fiatSaveMessage && (
-                                    <span className="text-sm text-slate-600 dark:text-slate-600">{fiatSaveMessage}</span>
-                                )}
-                            </div>
-                            {fiatPlannerSaves.length > 0 && (
-                                <div>
-                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Saved scenarios</p>
-                                    <ul className="space-y-2">
-                                        {fiatPlannerSaves.map((save) => {
-                                            const d = save.createdAt ? new Date(save.createdAt) : null;
-                                            const dateStr = d ? d.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-                                            const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "—";
-                                            const out = save.outputs;
-                                            const summaryStr = out
-                                                ? `Portfolio APY: ${out.portfolioApyMin?.toFixed(1) ?? "—"}% – ${out.portfolioApyMax?.toFixed(1) ?? "—"}% · Annual income: $${Number(out.expectedIncomeMin ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} – $${Number(out.expectedIncomeMax ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}/yr`
-                                                : "—";
-                                            return (
-                                                <li key={save.id} className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg border border-slate-200 bg-slate-50/50 dark:bg-slate-50/50">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <span className="text-xs text-slate-500 dark:text-slate-500">
-                                                            Saved on {dateStr} at {timeStr}
-                                                        </span>
-                                                        <span className="text-sm text-slate-700 dark:text-slate-700">{summaryStr}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        {fiatDeleteConfirmId === save.id ? (
-                                                            <>
-                                                                <span className="text-xs text-slate-600 dark:text-slate-600 mr-1">Delete?</span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setFiatDeleteConfirmId(null)}
-                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100"
-                                                                >
-                                                                    Cancel
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => deleteFiatPlannerSave(save.id)}
-                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-500"
-                                                                >
-                                                                    Delete
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => recallFiatPlannerSave(save)}
-                                                                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-blue-500 text-blue-600 hover:bg-blue-500 hover:text-white focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                                                                >
-                                                                    Recall
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setFiatDeleteConfirmId(save.id)}
-                                                                    className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 rounded focus:ring-2 focus:ring-red-500"
-                                                                    title="Delete"
-                                                                >
-                                                                    <Trash2 size={16} />
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Compliance Note */}
-                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4 border border-slate-200">
-                            <div className="flex gap-3">
-                                <Info className="text-slate-500 flex-shrink-0 mt-0.5" size={18} />
-                                <div className="text-xs text-slate-600 dark:text-slate-600 leading-relaxed">
-                                    <p className="font-medium mb-1">Compliance Note</p>
-                                    <p>All calculations are scenario illustrations based on user-defined assumptions and snapshot data. Rates & terms can change. Digital Credit Compass does not provide investment advice and does not execute transactions.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === "stablecoin" && (
-                    <div className="space-y-6">
-                        {/* Header */}
-                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                        >
-                            <div className="mb-4">
-                                <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-900 mb-2 flex items-center gap-2">
-                                    <CircleDollarSign className="text-green-500" size={24} />
-                                    Stablecoin Income Planner
-                                </h3>
-                                <p className="text-sm text-slate-600 dark:text-slate-600">
-                                    Plan a target stablecoin income stream using DeFi lending, protocol savings rates, CeFi rewards, and RWA pools. Risk-first approach with snapshot-driven rates.
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Inputs Section */}
-                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                        >
-                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Inputs</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Stablecoin Asset
-                                    </label>
-                                    <select
-                                        value={stablecoinPlanner.stablecoinAsset}
-                                        onChange={(e) => handleStablecoinPlannerChange("stablecoinAsset", e.target.value)}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    >
-                                        <option value="USDC">USDC</option>
-                                        <option value="USDT">USDT</option>
-                                        <option value="DAI">DAI</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Horizon (months)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={stablecoinPlanner.horizon}
-                                        onChange={(e) => handleStablecoinPlannerChange("horizon", parseInt(e.target.value) || 12)}
-                                        placeholder="12"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Region
-                                    </label>
-                                    <select
-                                        value={stablecoinPlanner.region}
-                                        onChange={(e) => handleStablecoinPlannerChange("region", e.target.value)}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    >
-                                        <option value="UAE">UAE</option>
-                                        <option value="US">US</option>
-                                        <option value="EU">EU</option>
-                                        <option value="UK">UK</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Liquidity Preference
-                                    </label>
-                                    <select
-                                        value={stablecoinPlanner.liquidityPreference}
-                                        onChange={(e) => handleStablecoinPlannerChange("liquidityPreference", e.target.value)}
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    >
-                                        <option value="On-demand">On-demand</option>
-                                        <option value="24h">24h</option>
-                                        <option value="Weekly">Weekly</option>
-                                        <option value="Monthly">Monthly</option>
-                                        <option value="Locked">Locked</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Mode
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={() => {
-                                                handleStablecoinPlannerChange("mode", "Guided");
-                                                if (stablecoinPlanner.mode !== "Guided") {
-                                                    setTimeout(applyStablecoinGuidedAllocation, 100);
-                                                }
-                                            }}
-                                            className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
-                                                stablecoinPlanner.mode === "Guided"
-                                                    ? "bg-green-500 text-white"
-                                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                            }`}
-                                        >
-                                            Guided
-                                        </button>
-                                        <button
-                                            onClick={() => handleStablecoinPlannerChange("mode", "Custom")}
-                                            className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
-                                                stablecoinPlanner.mode === "Custom"
-                                                    ? "bg-green-500 text-white"
-                                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                            }`}
-                                        >
-                                            Custom
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">
-                                        Target Monthly Income (USD) <span className="text-slate-400 font-normal">(optional)</span>
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={stablecoinPlanner.targetMonthlyIncome}
-                                        onChange={(e) => handleStablecoinPlannerChange("targetMonthlyIncome", e.target.value)}
-                                        placeholder="120"
-                                        className="w-full px-4 py-2 border border-slate-300 dark:border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-slate-900 dark:text-slate-900 bg-white dark:bg-white text-lg font-extrabold"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Instrument Selection */}
-                        {stablecoinPlanner.mode === "Custom" && (
-                            <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                            >
-                                <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Select Instruments</h4>
-                                {stablecoinInstrumentsLoading ? (
-                                    <p className="text-slate-500 py-4">Loading instruments…</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-500 mt-4 leading-relaxed">
+                                            {stablecoinIncomeCalc.isUserDefined ? (
+                                                <><span className="font-medium">Formula:</span> Capital × sum(weight% × APY%). Monthly = Annual ÷ 12.</>
+                                            ) : (
+                                                <><span className="font-medium">Formula:</span> (Capital × 70% × APYA) + (Capital × 30% × APYB). Monthly = Annual ÷ 12.</>
+                                            )}
+                                        </p>
+                                    </>
                                 ) : (
-                                <div className="space-y-3">
-                                    {stablecoinInstruments
-                                        .filter(instr => instr.supportedAsset === stablecoinPlanner.stablecoinAsset)
-                                        .map((instr) => (
-                                        <div key={instr.id} className="border border-slate-200 rounded-lg p-4">
-                                            <div className="flex items-start gap-3">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={instr.selected}
-                                                    onChange={() => handleStablecoinInstrumentToggle(instr.id)}
-                                                    className="mt-1 w-4 h-4"
-                                                />
-                                                <div className="flex-1">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <div>
-                                                            <h5 className="font-semibold text-slate-900 dark:text-slate-900">{instr.productName}</h5>
-                                                            <p className="text-xs text-slate-600 dark:text-slate-600">
-                                                                {instr.issuer} • {instr.venueType}
-                                                                {instr.chain && ` • ${instr.chain}`}
-                                                            </p>
-                                                        </div>
-                                                        {instr.selected && (
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    type="number"
-                                                                    min="0"
-                                                                    max="100"
-                                                                    value={instr.weight}
-                                                                    onChange={(e) => handleStablecoinWeightChange(instr.id, e.target.value)}
-                                                                    className="w-20 px-2 py-1 border border-slate-300 rounded text-sm font-bold text-slate-900"
-                                                                />
-                                                                <span className="text-sm text-slate-600">%</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-600 dark:text-slate-600 mb-2">
-                                                        <div>
-                                                            <span className="font-medium">APY:</span> {instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Type:</span> {instr.rateType}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Liquidity:</span> {instr.liquidity}
-                                                        </div>
-                                                        <div>
-                                                            <span className="font-medium">Eligibility:</span> {instr.eligibilityStatus}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-xs text-slate-500">
-                                                        Risks: {Array.isArray(instr.riskTags) ? instr.riskTags.join(", ") : "—"}
-                                                    </div>
-                                                </div>
-                                            </div>
+                                    <div className="py-8 text-center">
+                                        <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-200 mb-3">
+                                            <TrendingUp className="text-slate-400 dark:text-slate-500" size={28} />
                                         </div>
-                                    ))}
-                                    <div className="text-sm text-slate-600 dark:text-slate-600 mt-2">
-                                        Total Weight: {stablecoinInstruments.filter(i => i.selected).reduce((sum, i) => sum + (i.weight || 0), 0).toFixed(1)}%
+                                        <p className="text-sm font-medium text-slate-600 dark:text-slate-600">No projection yet</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 max-w-sm mx-auto">
+                                            {stablecoinPlanner.scenarioType === "User defined"
+                                                ? "Select instruments, set allocations to sum 100%, and ensure Capital (USD) &gt; 0."
+                                                : "Click &quot;Select top providers&quot; to load data. Ensure Capital (USD) &gt; 0 and product APYs contain numbers (e.g. 5%, 4-6%)."}
+                                        </p>
                                     </div>
-                                </div>
                                 )}
                             </div>
-                        )}
-
-                        {/* Results */}
-                        {stablecoinResults && (
-                            <>
-                                {/* Allocation Table */}
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                                >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Allocation Summary</h4>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full">
-                                            <thead>
-                                                <tr className="border-b border-slate-200">
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Issuer</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Product</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Venue</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Chain</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Liquidity</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">APY Range</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Rate Type</th>
-                                                    <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-700">Weight</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {stablecoinResults.selected.map((instr, idx) => (
-                                                    <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                                        <td className="py-3 px-4 text-sm text-slate-900 dark:text-slate-900">{instr.issuer}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.productName}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.venueType}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.chain || "N/A"}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.liquidity}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.apyMinPct != null && instr.apyMaxPct != null ? `${instr.apyMinPct}% – ${instr.apyMaxPct}%` : (instr.apyMin != null && instr.apyMax != null ? `${Number(instr.apyMin) * 100}% – ${Number(instr.apyMax) * 100}%` : (instr.rateType || "—"))}</td>
-                                                        <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-700">{instr.rateType}</td>
-                                                        <td className="py-3 px-4 text-sm font-semibold text-slate-900 dark:text-slate-900">{instr.weight}%</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-4">
-                                        Rate as of: {new Date(stablecoinResults.rateAsOf).toLocaleString()}
-                                    </div>
-                                </div>
-
-                                {/* Estimated Income Range */}
-                                <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                    style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                                >
-                                    <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Estimated Income</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Monthly Income Range</p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                ${stablecoinResults.monthlyIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${stablecoinResults.monthlyIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                        </div>
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Total Income Over {stablecoinPlanner.horizon} Months</p>
-                                            <p className="text-xl font-bold text-slate-900 dark:text-slate-900">
-                                                ${stablecoinResults.totalIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${stablecoinResults.totalIncomeMax.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Gap vs Target */}
-                                {stablecoinResults.gapVsTarget !== null && (
-                                    <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                                        style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                                    >
-                                        <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Gap vs Target</h4>
-                                        <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4">
-                                            <p className="text-xs text-slate-600 dark:text-slate-600 mb-1">Monthly Income Gap (using conservative estimate)</p>
-                                            <p className={`text-xl font-bold ${
-                                                stablecoinResults.gapVsTarget >= 0 
-                                                    ? "text-green-600" 
-                                                    : "text-red-600"
-                                            }`}>
-                                                {stablecoinResults.gapVsTarget >= 0 ? "+" : ""}${stablecoinResults.gapVsTarget.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                            <p className="text-xs text-slate-500 mt-1">
-                                                Target: ${stablecoinPlanner.targetMonthlyIncome} | Estimated (min): ${stablecoinResults.monthlyIncomeMin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                        </div>
-                                    </div>
-                                )}
-                            </>
-                        )}
-
-                        {/* Save and recall scenario (Stablecoin) */}
-                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
-                            style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
-                        >
-                            <h4 className="text-base font-semibold text-slate-900 dark:text-slate-900 mb-3">Save and recall a scenario</h4>
-                            <div className="flex flex-wrap items-center gap-2 mb-4">
-                                <button
-                                    type="button"
-                                    onClick={saveStablecoinPlannerScenario}
-                                    disabled={!stablecoinResults}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                                >
-                                    <Save size={16} />
-                                    Save
-                                </button>
-                                {stablecoinSaveMessage && (
-                                    <span className="text-sm text-slate-600 dark:text-slate-600">{stablecoinSaveMessage}</span>
-                                )}
-                            </div>
-                            {stablecoinPlannerSaves.length > 0 && (
-                                <div>
-                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-700 mb-2">Saved scenarios</p>
-                                    <ul className="space-y-2">
-                                        {stablecoinPlannerSaves.map((save) => {
-                                            const d = save.createdAt ? new Date(save.createdAt) : null;
-                                            const dateStr = d ? d.toLocaleDateString("en-US", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-                                            const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "—";
-                                            const out = save.outputs;
-                                            const summaryStr = out
-                                                ? `Monthly income: $${Number(out.monthlyIncomeMin ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} – $${Number(out.monthlyIncomeMax ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
-                                                : "—";
-                                            return (
-                                                <li key={save.id} className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg border border-slate-200 bg-slate-50/50 dark:bg-slate-50/50">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <span className="text-xs text-slate-500 dark:text-slate-500">
-                                                            {dateStr} at {timeStr}
-                                                        </span>
-                                                        <span className="text-sm text-slate-700 dark:text-slate-700">{summaryStr}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        {stablecoinDeleteConfirmId === save.id ? (
-                                                            <>
-                                                                <span className="text-xs text-slate-600 dark:text-slate-600 mr-1">Delete?</span>
-                                                                <button type="button" onClick={() => setStablecoinDeleteConfirmId(null)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100">Cancel</button>
-                                                                <button type="button" onClick={() => deleteStablecoinPlannerSave(save.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-sm font-medium rounded-lg border border-red-500 text-red-600 hover:bg-red-50 focus:ring-2 focus:ring-red-500">Delete</button>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <button type="button" onClick={() => recallStablecoinPlannerSave(save)} className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-green-500 text-green-600 hover:bg-green-500 hover:text-white focus:ring-2 focus:ring-green-500 focus:ring-offset-2">Recall</button>
-                                                                <button type="button" onClick={() => setStablecoinDeleteConfirmId(save.id)} className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 rounded focus:ring-2 focus:ring-red-500" title="Delete"><Trash2 size={16} /></button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            )}
                         </div>
 
-                        {/* Compliance Note */}
+                        {/* Section 5 - Footer disclaimer (same as BTC Compliance Note) */}
                         <div className="bg-slate-50 dark:bg-slate-50 rounded-lg p-4 border border-slate-200">
                             <div className="flex gap-3">
                                 <Info className="text-slate-500 flex-shrink-0 mt-0.5" size={18} />
                                 <div className="text-xs text-slate-600 dark:text-slate-600 leading-relaxed">
-                                    <p className="font-medium mb-1">Compliance Note</p>
-                                    <p>All calculations are scenario illustrations based on user-defined assumptions and snapshot data. Rates change frequently and are snapshot-driven with "as of" timestamps. Digital Credit Compass does not provide investment advice and does not execute transactions.</p>
+                                    <p className="font-medium mb-1">Micro-disclaimer</p>
+                                    <p>Outputs are modelled illustrations based on selected assumptions. They do not constitute financial advice.</p>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
+
             </div>
 
             {/* Delete Confirmation Modal */}

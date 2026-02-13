@@ -11,9 +11,14 @@ async function resolveId(params) {
 
 const toDecimal = (v) => (v != null && v !== '' ? new Prisma.Decimal(Number(v)) : undefined)
 
+const MODEL_UNAVAILABLE = { success: false, error: 'Database model not available. On the server run: prisma generate && pnpm run build, then redeploy.' }
+
 /** PATCH /api/crypto-lending-providers/[id] */
 export async function PATCH(request, { params }) {
   try {
+    if (!prisma?.cryptoLendingProvider) {
+      return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })
+    }
     const id = await resolveId(params)
     if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 })
     const existing = await prisma.cryptoLendingProvider.findUnique({ where: { id } })
@@ -47,6 +52,9 @@ export async function PATCH(request, { params }) {
 /** DELETE /api/crypto-lending-providers/[id] */
 export async function DELETE(request, { params }) {
   try {
+    if (!prisma?.cryptoLendingProvider) {
+      return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })
+    }
     const id = await resolveId(params)
     if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 })
     await prisma.cryptoLendingProvider.delete({ where: { id } })

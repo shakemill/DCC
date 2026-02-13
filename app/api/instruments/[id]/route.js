@@ -78,7 +78,6 @@ export async function PATCH(request, { params }) {
       'duration',
       'promoFlag',
       'unverifiableReason',
-      'datasetVersionId',
       'ltvTypical',
       'marginCallLtv',
       'liquidationLtv',

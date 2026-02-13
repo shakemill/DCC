@@ -15,7 +15,6 @@ import {
     ArrowRight,
     ShieldCheck,
     ChevronDown,
-    Layers
 } from "lucide-react"
 
 const dashboardCards = [
@@ -36,15 +35,6 @@ const dashboardCards = [
         color: "from-blue-500 to-blue-600",
         bgColor: "bg-blue-500/10",
         iconColor: "text-blue-500"
-    },
-    {
-        title: "Product Universe",
-        description: "Reference table of products with ticker, APY range, rate type and notes",
-        href: "/features/product-universe",
-        icon: Layers,
-        color: "from-teal-500 to-teal-600",
-        bgColor: "bg-teal-500/10",
-        iconColor: "text-teal-500"
     },
     {
         title: "Reports",
