@@ -126,19 +126,19 @@ export default function IncomePlannersPage() {
         }
     }, [activeTab]);
 
-    // Load stablecoin top providers from cookie cache when switching to stablecoin tab or changing base stablecoin
+    // Load stablecoin top providers from DB by score when switching to stablecoin tab (Modelled)
     useEffect(() => {
-        if (activeTab === "stablecoin") {
+        if (activeTab === "stablecoin" && stablecoinPlanner.scenarioType === "Modelled") {
             const base = stablecoinPlanner.baseStablecoin || "USDC";
             const cached = getStablecoinTopProvidersCache(base);
-            setStablecoinProvidersCached(!!cached);
-            setStablecoinTopProviders(
-                cached
-                    ? { collateralisedLending: cached.collateralisedLending, cefiSavings: cached.cefiSavings }
-                    : { collateralisedLending: [], cefiSavings: [] }
-            );
+            if (cached && ((cached.collateralisedLending?.length || 0) + (cached.cefiSavings?.length || 0) > 0)) {
+                setStablecoinTopProviders({ collateralisedLending: cached.collateralisedLending, cefiSavings: cached.cefiSavings });
+                setStablecoinTopProvidersError(null);
+            } else {
+                fetchStablecoinTopProviders();
+            }
         }
-    }, [activeTab, stablecoinPlanner.baseStablecoin]);
+    }, [activeTab, stablecoinPlanner.scenarioType, stablecoinPlanner.baseStablecoin]);
 
     // User defined scenario: fetch all stablecoin products
     useEffect(() => {
@@ -173,12 +173,16 @@ export default function IncomePlannersPage() {
         return () => { cancelled = true; };
     }, [activeTab, stablecoinPlanner.scenarioType]);
 
-    // Fiat Income Planner: load top providers from cache when switching to fiat tab (Modelled)
+    // Fiat Income Planner: fetch top 3 providers by score from DB when Modelled
     useEffect(() => {
         if (activeTab === "fiat" && fiatPlanner.scenarioType === "Modelled") {
             const cached = getFiatTopProvidersCache();
-            setFiatProvidersCached(Array.isArray(cached) && cached.length > 0);
-            setFiatTopProviders(cached || []);
+            if (Array.isArray(cached) && cached.length > 0) {
+                setFiatTopProviders(cached);
+                setFiatTopProvidersError(null);
+            } else {
+                fetchFiatTopProviders();
+            }
         }
     }, [activeTab, fiatPlanner.scenarioType]);
 
@@ -1375,22 +1379,9 @@ export default function IncomePlannersPage() {
                         <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
                             style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
                         >
-                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers</h4>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={fetchFiatTopProviders}
-                                    disabled={fiatTopProvidersLoading || fiatProvidersCached}
-                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-[#f49d1d] text-white hover:bg-[#d6891a] disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2"
-                                >
-                                    <RefreshCw size={18} className={fiatTopProvidersLoading ? "animate-spin" : ""} />
-                                    {fiatTopProvidersLoading ? "Selecting..." : "Select top providers"}
-                                </button>
-                                {fiatProvidersCached && !fiatTopProvidersLoading && (
-                                    <span className="text-xs text-slate-500 dark:text-slate-500">Cached for 24h – refresh tomorrow</span>
-                                )}
-                            </div>
-                            {fiatTopProvidersError && <p className="mt-2 text-sm text-red-600">{fiatTopProvidersError}</p>}
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers (by score)</h4>
+                            {fiatTopProvidersLoading && <p className="text-sm text-slate-500 mb-2">Loading top providers from database…</p>}
+                            {fiatTopProvidersError && <p className="text-sm text-red-600 mb-2">{fiatTopProvidersError}</p>}
                             {fiatTopProviders?.length === 0 && !fiatTopProvidersLoading && (
                                 <p className="mt-4 text-sm text-slate-500">No products in database. Admin can populate via Generate from ChatGPT in Admin &gt; Fiat Income.</p>
                             )}
@@ -1429,7 +1420,7 @@ export default function IncomePlannersPage() {
                                             <div className="px-4 py-8 text-center">
                                                 <Activity className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
                                                 <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
-                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                                <p className="text-xs text-slate-400 mt-1">Top providers load from database by score</p>
                                             </div>
                                         )}
                                     </div>
@@ -1675,21 +1666,8 @@ export default function IncomePlannersPage() {
                         <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8"
                             style={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)" }}
                         >
-                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers</h4>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={fetchStablecoinTopProviders}
-                                    disabled={stablecoinTopProvidersLoading || stablecoinProvidersCached}
-                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-[#f49d1d] text-white hover:bg-[#d6891a] disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-[#f49d1d] focus:ring-offset-2"
-                                >
-                                    <RefreshCw size={18} className={stablecoinTopProvidersLoading ? "animate-spin" : ""} />
-                                    {stablecoinTopProvidersLoading ? "Selecting..." : "Select top providers"}
-                                </button>
-                                {stablecoinProvidersCached && !stablecoinTopProvidersLoading && (
-                                    <span className="text-xs text-slate-500 dark:text-slate-500">Cached for 24h – refresh tomorrow</span>
-                                )}
-                            </div>
+                            <h4 className="text-lg font-semibold text-slate-900 dark:text-slate-900 mb-4">Modelled Scenario – Top Providers (by score)</h4>
+                            {stablecoinTopProvidersLoading && <p className="text-sm text-slate-500 mb-2">Loading top providers from database…</p>}
                             {stablecoinTopProvidersError && (
                                 <p className="mt-2 text-sm text-red-600">{stablecoinTopProvidersError}</p>
                             )}
@@ -1737,7 +1715,7 @@ export default function IncomePlannersPage() {
                                             <div className="px-4 py-8 text-center">
                                                 <Activity className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
                                                 <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
-                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                                <p className="text-xs text-slate-400 mt-1">Top providers load from database by score</p>
                                             </div>
                                         )}
                                     </div>
@@ -1783,7 +1761,7 @@ export default function IncomePlannersPage() {
                                             <div className="px-4 py-8 text-center">
                                                 <Building2 className="mx-auto text-slate-300 dark:text-slate-500 mb-2" size={32} />
                                                 <p className="text-sm text-slate-500 dark:text-slate-500">No providers yet</p>
-                                                <p className="text-xs text-slate-400 mt-1">Click &quot;Select top providers&quot; to load</p>
+                                                <p className="text-xs text-slate-400 mt-1">Top providers load from database by score</p>
                                             </div>
                                         )}
                                     </div>
@@ -2075,7 +2053,7 @@ export default function IncomePlannersPage() {
                                         <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 max-w-sm mx-auto">
                                             {stablecoinPlanner.scenarioType === "User defined"
                                                 ? "Select instruments, set allocations to sum 100%, and ensure Capital (USD) &gt; 0."
-                                                : "Click &quot;Select top providers&quot; to load data. Ensure Capital (USD) &gt; 0 and product APYs contain numbers (e.g. 5%, 4-6%)."}
+                                                : "Top providers load from database by score. Ensure Capital (USD) &gt; 0 and product APYs contain numbers (e.g. 5%, 4-6%)."}
                                         </p>
                                     </div>
                                 )}
