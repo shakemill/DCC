@@ -17,7 +17,7 @@ export default function Footer() {
                         <Image className="h-9 md:h-9.5 w-auto shrink-0" src={theme === "dark" ? "/assets/logo.png" : "/assets/logo.png"} alt="Logo" width={140} height={40} priority fetchPriority="high" />
                     </a>
                     <p className="mt-6">
-                    Digital Credit Compass is an independent, non-custodial analytics platform providing scenario modeling and risk transparency across Bitcoin, fiat, and stablecoin instruments.
+                    Digital Credit Compass is an independent, non-custodial analytics and planning platform that helps users model income scenarios and understand risks across Bitcoin, fiat, and stablecoin credit instruments.
                     </p>
                 </div>
                 <div className="flex-1 flex items-start md:justify-end gap-20">

@@ -57,7 +57,7 @@ export default function Page() {
             <div className="flex flex-col items-center text-center justify-center mt-20">
                 <h3 className="text-3xl font-semibold mt-16 mb-4">Ready to Get Started?</h3>
                 <p className="text-slate-600 dark:text-slate-200 max-w-xl mx-auto">
-                    Start planning your Bitcoin-backed income strategy today. Create transparent, risk-assessed financial plans without custody or execution — all analysis, no commitment.
+                Start building structured, risk-assessed income plans using Bitcoin, USD, and stablecoin credit instruments. Digital Credit Compass provides independent scenario modeling and full risk transparency in a non-custodial, analytics-only environment — no custody, no execution, just informed planning.
                 </p>
                 <div className="flex items-center gap-4 mt-8">
                     <Link href="/get-started" className="bg-[#f49d1d] hover:bg-[#d6891a] transition text-white rounded-md px-6 h-11 flex items-center justify-center">
