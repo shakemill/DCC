@@ -18,6 +18,7 @@ import {
   Coins,
   Award,
 } from "lucide-react"
+import { parseApy } from "@/lib/parseApy"
 
 const PER_PAGE = 10
 
@@ -46,6 +47,7 @@ const TAB_CONFIG = {
       { key: "issuerProvider", label: "Issuer / Provider" },
       { key: "productInstrument", label: "Product / Instrument" },
       { key: "apyCost", label: "APY / Cost" },
+      { key: "qualityScore", label: "Score" },
       { key: "jurisdiction", label: "Jurisdiction" },
       { key: "category", label: "Category" },
     ],
@@ -59,7 +61,7 @@ const TAB_CONFIG = {
       { key: "product", label: "Product" },
       { key: "ticker", label: "Ticker / ID" },
       { key: "type", label: "Type" },
-      { key: "qualityScore", label: "Score" },
+      { key: "qualityScore", label: "Score brut" },
     ],
     filterKeys: ["issuer", "product", "ticker", "type"],
   },
@@ -106,8 +108,10 @@ export default function AdminPage() {
   const [editingStablecoinSyncRowIndex, setEditingStablecoinSyncRowIndex] = useState(null)
   const [stablecoinScoreLoading, setStablecoinScoreLoading] = useState(false)
   const [stablecoinScoreMessage, setStablecoinScoreMessage] = useState(null)
-  const [usdIncomeScoreLoading, setUsdIncomeScoreLoading] = useState(false)
-  const [usdIncomeScoreMessage, setUsdIncomeScoreMessage] = useState(null)
+  const [bitcoinBackedLenderScoreLoading, setBitcoinBackedLenderScoreLoading] = useState(false)
+  const [bitcoinBackedLenderScoreMessage, setBitcoinBackedLenderScoreMessage] = useState(null)
+  const [comingSoon, setComingSoon] = useState(false)
+  const [comingSoonLoading, setComingSoonLoading] = useState(false)
 
   const conf = TABS.find((t) => t.id === tab)
   const tabConf = TAB_CONFIG[tab] || null
@@ -159,6 +163,34 @@ export default function AdminPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => { fetchStats() }, [fetchStats])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/site-settings")
+      .then((res) => res.json())
+      .then((data) => { if (!cancelled && data?.comingSoon != null) setComingSoon(data.comingSoon) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const handleToggleComingSoon = async () => {
+    const next = !comingSoon
+    setComingSoonLoading(true)
+    try {
+      const res = await fetch("/api/admin/site-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comingSoon: next }),
+      })
+      const json = await res.json()
+      if (res.ok && json?.success) setComingSoon(json.comingSoon)
+      else throw new Error(json?.error || "Failed")
+    } catch (e) {
+      alert(e.message || "Failed to update Coming Soon mode")
+    } finally {
+      setComingSoonLoading(false)
+    }
+  }
 
   useEffect(() => {
     setPage(1)
@@ -234,27 +266,59 @@ export default function AdminPage() {
     return json
   }
 
+  const getBitcoinBackedLenderPayload = (fd) => {
+    const yn = (key) => { const v = fd.get(key); return v === "Yes" ? true : v === "No" ? false : null }
+    const str = (key) => { const v = fd.get(key); return v != null && String(v).trim() !== "" ? String(v).trim() : null }
+    const num = (key) => { const v = fd.get(key); if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null }
+    return {
+      issuerProvider: fd.get("issuerProvider")?.toString()?.trim() || "",
+      productInstrument: fd.get("productInstrument")?.toString()?.trim() || "",
+      apyCost: str("apyCost") ?? undefined,
+      duration: str("duration") ?? undefined,
+      collateral: str("collateral") ?? undefined,
+      jurisdiction: str("jurisdiction") ?? undefined,
+      lockup: str("lockup") ?? undefined,
+      seniority: str("seniority") ?? undefined,
+      notes: str("notes") ?? undefined,
+      sources: str("sources") ?? undefined,
+      category: str("category") ?? undefined,
+      tosPublic: yn("tosPublic"),
+      liquidationLtvPublished: yn("liquidationLtvPublished"),
+      marginCallRulesPublished: yn("marginCallRulesPublished"),
+      feeScheduleDisclosed: str("feeScheduleDisclosed"),
+      collateralHandlingDisclosed: str("collateralHandlingDisclosed"),
+      termsAfterOnboarding: yn("termsAfterOnboarding"),
+      liquidationVague: yn("liquidationVague"),
+      feesVariableNoRange: yn("feesVariableNoRange"),
+      collateralTopUpSpeed: str("collateralTopUpSpeed"),
+      partialRepayment: str("partialRepayment"),
+      earlyClosure: str("earlyClosure"),
+      marginCallGracePeriod: str("marginCallGracePeriod"),
+      autoRepay: yn("autoRepay"),
+      autoTopUp: yn("autoTopUp"),
+      alerts: yn("alerts"),
+      governingLaw: str("governingLaw"),
+      separateSpv: yn("separateSpv"),
+      custodyModel: str("custodyModel"),
+      rehypothecationAllowed: yn("rehypothecationAllowed"),
+      btcLentOnward: yn("btcLentOnward"),
+      counterpartyCount: str("counterpartyCount"),
+      yearsOperating: num("yearsOperating"),
+      knownIncidents: str("knownIncidents"),
+      historicalFreezes: yn("historicalFreezes"),
+    }
+  }
+
   const handleCreateBitcoinBackedLender = async (e) => {
     e.preventDefault()
     setFormError(null)
     setSubmitting(true)
     try {
       const fd = new FormData(e.target)
+      const payload = getBitcoinBackedLenderPayload(fd)
       await api("/api/bitcoin-backed-lenders", {
         method: "POST",
-        body: JSON.stringify({
-          issuerProvider: fd.get("issuerProvider") || "",
-          productInstrument: fd.get("productInstrument") || "",
-          apyCost: fd.get("apyCost") || undefined,
-          duration: fd.get("duration") || undefined,
-          collateral: fd.get("collateral") || undefined,
-          jurisdiction: fd.get("jurisdiction") || undefined,
-          lockup: fd.get("lockup") || undefined,
-          seniority: fd.get("seniority") || undefined,
-          notes: fd.get("notes") || undefined,
-          sources: fd.get("sources") || undefined,
-          category: fd.get("category") || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       closeModal()
       fetchData()
@@ -273,21 +337,10 @@ export default function AdminPage() {
     setSubmitting(true)
     try {
       const fd = new FormData(e.target)
+      const payload = getBitcoinBackedLenderPayload(fd)
       await api(`/api/bitcoin-backed-lenders/${editItem.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          issuerProvider: fd.get("issuerProvider") || "",
-          productInstrument: fd.get("productInstrument") || "",
-          apyCost: fd.get("apyCost") || undefined,
-          duration: fd.get("duration") || undefined,
-          collateral: fd.get("collateral") || undefined,
-          jurisdiction: fd.get("jurisdiction") || undefined,
-          lockup: fd.get("lockup") || undefined,
-          seniority: fd.get("seniority") || undefined,
-          notes: fd.get("notes") || undefined,
-          sources: fd.get("sources") || undefined,
-          category: fd.get("category") || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       closeModal()
       fetchData()
@@ -594,6 +647,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           issuer: fd.get("issuer") || "",
           product: fd.get("product") || "",
+          baseStablecoin: fd.get("baseStablecoin") || undefined,
           apy: fd.get("apy") || undefined,
           duration: fd.get("duration") || undefined,
           collateral: fd.get("collateral") || undefined,
@@ -627,6 +681,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           issuer: fd.get("issuer") || "",
           product: fd.get("product") || "",
+          baseStablecoin: fd.get("baseStablecoin") || undefined,
           apy: fd.get("apy") || undefined,
           duration: fd.get("duration") || undefined,
           collateral: fd.get("collateral") || undefined,
@@ -741,6 +796,7 @@ export default function AdminPage() {
     const updated = {
       issuer: fd.get("issuer")?.toString()?.trim() || "",
       product: fd.get("product")?.toString()?.trim() || "",
+      baseStablecoin: fd.get("baseStablecoin")?.toString()?.trim() || null,
       apy: fd.get("apy")?.toString()?.trim() || null,
       duration: fd.get("duration")?.toString()?.trim() || null,
       collateral: fd.get("collateral")?.toString()?.trim() || null,
@@ -810,27 +866,27 @@ export default function AdminPage() {
     }
   }
 
-  const handleScoreUsdIncome = async () => {
-    setUsdIncomeScoreLoading(true)
-    setUsdIncomeScoreMessage(null)
+  const handleScoreBitcoinBackedLender = async () => {
+    setBitcoinBackedLenderScoreLoading(true)
+    setBitcoinBackedLenderScoreMessage(null)
     try {
-      const res = await fetch("/api/usd-income/score", {
+      const res = await fetch("/api/bitcoin-backed-lenders/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setUsdIncomeScoreMessage(json?.error || "Score computation failed")
+        setBitcoinBackedLenderScoreMessage(json?.error || "Score computation failed")
         return
       }
       fetchData()
-      setUsdIncomeScoreMessage(json?.message || "Scores calculés")
-      setTimeout(() => setUsdIncomeScoreMessage(null), 5000)
+      setBitcoinBackedLenderScoreMessage(json?.message || "Scores calculés")
+      setTimeout(() => setBitcoinBackedLenderScoreMessage(null), 5000)
     } catch (err) {
-      setUsdIncomeScoreMessage(err?.message || "Score computation failed")
+      setBitcoinBackedLenderScoreMessage(err?.message || "Score computation failed")
     } finally {
-      setUsdIncomeScoreLoading(false)
+      setBitcoinBackedLenderScoreLoading(false)
     }
   }
 
@@ -843,7 +899,7 @@ export default function AdminPage() {
       const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-slate-400 outline-none transition text-slate-900"
       const labelClass = "block text-sm font-medium text-slate-700 mb-1"
       return (
-        <Modal title={isEdit ? "Edit bitcoin backed lender" : "Create bitcoin backed lender"} onClose={closeModal} size="wide">
+        <Modal key={`btc-${modal}-${b?.id ?? "new"}`} title={isEdit ? "Edit bitcoin backed lender" : "Create bitcoin backed lender"} onClose={closeModal} size="wide">
           <form onSubmit={isEdit ? handleEditBitcoinBackedLender : handleCreateBitcoinBackedLender} className="space-y-4">
             {formError && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">{formError}</div>
@@ -897,6 +953,57 @@ export default function AdminPage() {
                 <option value="Regulated Banks">Regulated Banks</option>
               </select>
             </div>
+
+            <div className="border-t border-slate-200 pt-4 mt-4">
+              <h4 className="text-sm font-semibold text-slate-800 mb-2">1. Transparency (0–30)</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={labelClass}>Public TOS available?</label><select name="tosPublic" className={inputClass} defaultValue={b?.tosPublic === true ? "Yes" : b?.tosPublic === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Liquidation LTV published?</label><select name="liquidationLtvPublished" className={inputClass} defaultValue={b?.liquidationLtvPublished === true ? "Yes" : b?.liquidationLtvPublished === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Margin call rules published?</label><select name="marginCallRulesPublished" className={inputClass} defaultValue={b?.marginCallRulesPublished === true ? "Yes" : b?.marginCallRulesPublished === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Fee schedule disclosed?</label><select name="feeScheduleDisclosed" className={inputClass} defaultValue={b?.feeScheduleDisclosed ?? ""}><option value="">—</option><option value="Yes">Yes</option><option value="Partial">Partial</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Collateral handling disclosed?</label><select name="collateralHandlingDisclosed" className={inputClass} defaultValue={b?.collateralHandlingDisclosed ?? ""}><option value="">—</option><option value="Yes">Yes</option><option value="Partial">Partial</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Terms only after onboarding?</label><select name="termsAfterOnboarding" className={inputClass} defaultValue={b?.termsAfterOnboarding === true ? "Yes" : b?.termsAfterOnboarding === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Liquidation rules vague?</label><select name="liquidationVague" className={inputClass} defaultValue={b?.liquidationVague === true ? "Yes" : b?.liquidationVague === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Fees variable without ranges?</label><select name="feesVariableNoRange" className={inputClass} defaultValue={b?.feesVariableNoRange === true ? "Yes" : b?.feesVariableNoRange === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-3">
+              <h4 className="text-sm font-semibold text-slate-800 mb-2">2. Risk Control & Flexibility (0–25)</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={labelClass}>Collateral top-up speed</label><select name="collateralTopUpSpeed" className={inputClass} defaultValue={b?.collateralTopUpSpeed ?? ""}><option value="">—</option><option value="Instant">Instant</option><option value="Same-day">Same-day</option><option value="Delayed">Delayed</option><option value="Not allowed">Not allowed</option></select></div>
+                <div><label className={labelClass}>Partial repayment</label><select name="partialRepayment" className={inputClass} defaultValue={b?.partialRepayment ?? ""}><option value="">—</option><option value="Anytime">Anytime</option><option value="Limited">Limited</option><option value="Not allowed">Not allowed</option></select></div>
+                <div><label className={labelClass}>Early loan closure</label><select name="earlyClosure" className={inputClass} defaultValue={b?.earlyClosure ?? ""}><option value="">—</option><option value="Anytime">Anytime</option><option value="With penalty">With penalty</option><option value="Locked">Locked</option></select></div>
+                <div><label className={labelClass}>Margin call grace period</label><select name="marginCallGracePeriod" className={inputClass} defaultValue={b?.marginCallGracePeriod ?? ""}><option value="">—</option><option value="≥24h">≥24h</option><option value="1–12h">1–12h</option><option value="Immediate">Immediate</option></select></div>
+                <div><label className={labelClass}>Auto-repay</label><select name="autoRepay" className={inputClass} defaultValue={b?.autoRepay === true ? "Yes" : b?.autoRepay === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Auto-top-up</label><select name="autoTopUp" className={inputClass} defaultValue={b?.autoTopUp === true ? "Yes" : b?.autoTopUp === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Alerts</label><select name="alerts" className={inputClass} defaultValue={b?.alerts === true ? "Yes" : b?.alerts === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-3">
+              <h4 className="text-sm font-semibold text-slate-800 mb-2">3. Jurisdiction (0–20)</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={labelClass}>Governing law</label><select name="governingLaw" className={inputClass} defaultValue={b?.governingLaw ?? ""}><option value="">—</option><option value="US">US</option><option value="Switzerland">Switzerland</option><option value="Luxembourg">Luxembourg</option><option value="Germany">Germany</option><option value="EU">EU</option><option value="UK">UK</option><option value="Singapore">Singapore</option><option value="UAE">UAE</option><option value="Hong Kong">Hong Kong</option><option value="Cayman">Cayman</option><option value="BVI">BVI</option><option value="Seychelles">Seychelles</option><option value="Panama">Panama</option><option value="Unknown">Unknown</option></select></div>
+                <div><label className={labelClass}>Separate SPV used?</label><select name="separateSpv" className={inputClass} defaultValue={b?.separateSpv === true ? "Yes" : b?.separateSpv === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-3">
+              <h4 className="text-sm font-semibold text-slate-800 mb-2">4. Structure (0–15)</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={labelClass}>Custody model</label><select name="custodyModel" className={inputClass} defaultValue={b?.custodyModel ?? ""}><option value="">—</option><option value="Segregated">Segregated</option><option value="Commingled">Commingled</option></select></div>
+                <div><label className={labelClass}>Rehypothecation allowed?</label><select name="rehypothecationAllowed" className={inputClass} defaultValue={b?.rehypothecationAllowed === true ? "Yes" : b?.rehypothecationAllowed === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>BTC lent onward?</label><select name="btcLentOnward" className={inputClass} defaultValue={b?.btcLentOnward === true ? "Yes" : b?.btcLentOnward === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+                <div><label className={labelClass}>Counterparty count</label><select name="counterpartyCount" className={inputClass} defaultValue={b?.counterpartyCount ?? ""}><option value="">—</option><option value="Single">Single</option><option value="Multiple">Multiple</option></select></div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-3">
+              <h4 className="text-sm font-semibold text-slate-800 mb-2">5. Track Record (0–10)</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={labelClass}>Years operating</label><input name="yearsOperating" type="number" min="0" max="50" className={inputClass} defaultValue={b?.yearsOperating ?? ""} placeholder="e.g. 3" /></div>
+                <div><label className={labelClass}>Known incidents</label><select name="knownIncidents" className={inputClass} defaultValue={b?.knownIncidents ?? ""}><option value="">—</option><option value="None">None</option><option value="Minor">Minor</option><option value="Major">Major</option></select></div>
+                <div><label className={labelClass}>Historical freezes?</label><select name="historicalFreezes" className={inputClass} defaultValue={b?.historicalFreezes === true ? "Yes" : b?.historicalFreezes === false ? "No" : ""}><option value="">—</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
+              </div>
+            </div>
+
             <div>
               <label className={labelClass}>Notes</label>
               <input name="notes" defaultValue={b?.notes} className={inputClass} placeholder="LTV, liquidation, custody, etc." />
@@ -919,7 +1026,7 @@ export default function AdminPage() {
       const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-slate-400 outline-none transition text-slate-900"
       const labelClass = "block text-sm font-medium text-slate-700 mb-1"
       return (
-        <Modal title={isEdit ? "Edit Fiat income product" : "Create Fiat income product"} onClose={closeModal} size="wide">
+        <Modal key={`usd-${modal}-${y?.id ?? "new"}`} title={isEdit ? "Edit Fiat income product" : "Create Fiat income product"} onClose={closeModal} size="wide">
           <form onSubmit={isEdit ? handleEditUsdIncome : handleCreateUsdIncome} className="space-y-4">
             {formError && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">{formError}</div>
@@ -992,7 +1099,7 @@ export default function AdminPage() {
       const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-slate-400 outline-none transition text-slate-900"
       const labelClass = "block text-sm font-medium text-slate-700 mb-1"
       return (
-        <Modal title={isEdit ? "Edit stablecoin product" : "Create stablecoin product"} onClose={closeModal} size="wide">
+        <Modal key={`stable-${modal}-${s?.id ?? "new"}`} title={isEdit ? "Edit stablecoin product" : "Create stablecoin product"} onClose={closeModal} size="wide">
           <form onSubmit={isEdit ? handleEditStablecoinProduct : handleCreateStablecoinProduct} className="space-y-4">
             {formError && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">{formError}</div>
@@ -1012,6 +1119,27 @@ export default function AdminPage() {
               <div>
                 <label className={labelClass}>Product / Instrument Name</label>
                 <input name="product" defaultValue={s?.product} className={inputClass} required placeholder="e.g. USDC Flexible" />
+              </div>
+              <div>
+                <label className={labelClass}>Base Stablecoin</label>
+                <div className="flex items-center gap-4 mt-1">
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="baseStablecoin" value="USDC" defaultChecked={s?.baseStablecoin === "USDC"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                    <span>USDC</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="baseStablecoin" value="USDT" defaultChecked={s?.baseStablecoin === "USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                    <span>USDT</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="baseStablecoin" value="USDC/USDT" defaultChecked={s?.baseStablecoin === "USDC/USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                    <span>USDC/USDT</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="baseStablecoin" value="" defaultChecked={s?.baseStablecoin !== "USDC" && s?.baseStablecoin !== "USDT" && s?.baseStablecoin !== "USDC/USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                    <span>—</span>
+                  </label>
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1141,50 +1269,70 @@ export default function AdminPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleToggleComingSoon}
+            disabled={comingSoonLoading}
+            title={comingSoon ? "Désactiver le mode Coming Soon" : "Activer le mode Coming Soon"}
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border font-medium text-sm transition disabled:opacity-50 ${
+              comingSoon
+                ? "border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500 dark:bg-amber-900/30 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            {comingSoonLoading ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <span className="w-4 h-4 rounded-full border-2 flex items-center justify-center">
+                {comingSoon ? <span className="text-amber-600 dark:text-amber-400 font-bold">✓</span> : null}
+              </span>
+            )}
+            {comingSoon ? "Coming Soon activé" : "Mode Coming Soon"}
+          </button>
           <input
             type="search"
             placeholder="Filter…"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 text-sm w-48 max-w-full"
+            className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 text-sm w-48 max-w-full dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
           <button
             type="button"
             onClick={() => { fetchData(); fetchStats(); }}
             disabled={loading}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-medium text-sm transition disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-medium text-sm transition disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
           {tab === "bitcoinBackedLenders" && (
-            <button
-              type="button"
-              onClick={handleSyncBitcoinBackedLenders}
-              disabled={syncLoading || loading}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 font-medium text-sm hover:bg-emerald-100 transition disabled:opacity-50"
-            >
-              <RefreshCw size={16} className={syncLoading ? "animate-spin" : ""} /> Generate from ChatGPT
-            </button>
-          )}
-          {tab === "usdIncome" && (
             <>
               <button
                 type="button"
-                onClick={handleScoreUsdIncome}
-                disabled={usdIncomeScoreLoading || loading || data.length === 0}
+                onClick={handleScoreBitcoinBackedLender}
+                disabled={bitcoinBackedLenderScoreLoading || loading || data.length === 0}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 font-medium text-sm hover:bg-amber-100 transition disabled:opacity-50"
               >
-                <Award size={16} className={usdIncomeScoreLoading ? "animate-spin" : ""} /> Score
+                <Award size={16} className={bitcoinBackedLenderScoreLoading ? "animate-spin" : ""} /> Score
               </button>
               <button
                 type="button"
-                onClick={handleSyncUsdIncome}
+                onClick={handleSyncBitcoinBackedLenders}
                 disabled={syncLoading || loading}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 font-medium text-sm hover:bg-emerald-100 transition disabled:opacity-50"
               >
                 <RefreshCw size={16} className={syncLoading ? "animate-spin" : ""} /> Generate from ChatGPT
               </button>
             </>
+          )}
+          {tab === "usdIncome" && (
+            <button
+              type="button"
+              onClick={handleSyncUsdIncome}
+              disabled={syncLoading || loading}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 font-medium text-sm hover:bg-emerald-100 transition disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={syncLoading ? "animate-spin" : ""} /> Generate from ChatGPT
+            </button>
           )}
           {tab === "stablecoin" && (
             <>
@@ -1214,9 +1362,9 @@ export default function AdminPage() {
               </button>
             </>
           )}
-          {(syncMessage || (tab === "stablecoin" && stablecoinScoreMessage) || (tab === "usdIncome" && usdIncomeScoreMessage)) && (tab === "bitcoinBackedLenders" || tab === "usdIncome" || tab === "stablecoin") && (
+          {(syncMessage || (tab === "bitcoinBackedLenders" && bitcoinBackedLenderScoreMessage) || (tab === "stablecoin" && stablecoinScoreMessage)) && (tab === "bitcoinBackedLenders" || tab === "usdIncome" || tab === "stablecoin") && (
             <span className="text-sm text-slate-600">
-              {(tab === "usdIncome" && usdIncomeScoreMessage) ? usdIncomeScoreMessage : (tab === "stablecoin" && stablecoinScoreMessage) ? stablecoinScoreMessage : syncMessage}
+              {(tab === "bitcoinBackedLenders" && bitcoinBackedLenderScoreMessage) ? bitcoinBackedLenderScoreMessage : (tab === "stablecoin" && stablecoinScoreMessage) ? stablecoinScoreMessage : syncMessage}
             </span>
           )}
           {tab !== "users" && (
@@ -1388,6 +1536,7 @@ export default function AdminPage() {
                     <tr>
                       <th className="text-left py-2 px-3 font-semibold text-slate-700">Issuer / Provider</th>
                       <th className="text-left py-2 px-3 font-semibold text-slate-700">Product</th>
+                      <th className="text-left py-2 px-3 font-semibold text-slate-700">Base Stablecoin</th>
                       <th className="text-left py-2 px-3 font-semibold text-slate-700">APY</th>
                       <th className="text-left py-2 px-3 font-semibold text-slate-700">Duration</th>
                       <th className="text-left py-2 px-3 font-semibold text-slate-700">Collateral</th>
@@ -1405,6 +1554,7 @@ export default function AdminPage() {
                       <tr key={idx} className="border-b border-slate-100 last:border-0 even:bg-slate-50/50">
                         <td className="py-2 px-3 font-medium">{row.issuer ?? "—"}</td>
                         <td className="py-2 px-3">{row.product ?? "—"}</td>
+                        <td className="py-2 px-3">{row.baseStablecoin ?? "—"}</td>
                         <td className="py-2 px-3">{row.apy ?? "—"}</td>
                         <td className="py-2 px-3 text-slate-600 max-w-[120px]">{row.duration ?? "—"}</td>
                         <td className="py-2 px-3 text-slate-600 max-w-[140px]">{row.collateral ?? "—"}</td>
@@ -1687,6 +1837,27 @@ export default function AdminPage() {
                     <label className={labelClass}>Product / Instrument Name</label>
                     <input name="product" defaultValue={row.product ?? ""} className={inputClass} required placeholder="e.g. Product name" />
                   </div>
+                  <div>
+                    <label className={labelClass}>Base Stablecoin</label>
+                    <div className="flex items-center gap-4 mt-1">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="baseStablecoin" value="USDC" defaultChecked={row.baseStablecoin === "USDC"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                        <span>USDC</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="baseStablecoin" value="USDT" defaultChecked={row.baseStablecoin === "USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                        <span>USDT</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="baseStablecoin" value="USDC/USDT" defaultChecked={row.baseStablecoin === "USDC/USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                        <span>USDC/USDT</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="baseStablecoin" value="" defaultChecked={row.baseStablecoin !== "USDC" && row.baseStablecoin !== "USDT" && row.baseStablecoin !== "USDC/USDT"} className="rounded-full border-slate-300 text-slate-900 focus:ring-slate-400" />
+                        <span>—</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -1835,7 +2006,44 @@ function formatApyRange(apyMinPct, apyMaxPct) {
   return `${max}%`
 }
 
+function getBtcLenderRiskControlsDisplay(row) {
+  const topUp = row.collateralTopUpSpeed ? `Top-ups: ${row.collateralTopUpSpeed}` : null
+  const repay = row.partialRepayment ? `Repayment: ${row.partialRepayment === "Anytime" ? "Partial allowed" : row.partialRepayment}` : null
+  const margin = row.marginCallGracePeriod ? `Margin: ${row.marginCallGracePeriod === "≥24h" || row.marginCallGracePeriod === "24h" ? "24h grace" : row.marginCallGracePeriod}` : null
+  const closure = row.earlyClosure ? `Closure: ${row.earlyClosure === "Anytime" ? "Anytime" : row.earlyClosure}` : null
+  const parts = [topUp, repay, margin, closure].filter(Boolean)
+  if (parts.length > 0) {
+    const isRigid = row.marginCallGracePeriod === "Immediate" || row.earlyClosure === "Locked" || row.collateralTopUpSpeed === "Not allowed"
+    const isLimited = row.collateralTopUpSpeed === "Delayed" || row.partialRepayment === "Not allowed" || row.earlyClosure === "With penalty" || (row.marginCallGracePeriod && row.marginCallGracePeriod !== "≥24h" && row.marginCallGracePeriod !== "24h")
+    const colorClass = isRigid ? "text-red-600" : isLimited ? "text-amber-600" : "text-emerald-600"
+    return { text: parts.join(" · "), colorClass }
+  }
+  let breakdown = null
+  const raw = row.qualityScoreBreakdown
+  if (raw != null && typeof raw === "object") breakdown = raw
+  else if (typeof raw === "string") { try { breakdown = JSON.parse(raw) } catch { /* ignore */ } }
+  if (breakdown && breakdown.riskControl != null) {
+    return { text: `Risk: ${breakdown.riskControl}/25`, colorClass: "text-slate-600" }
+  }
+  return { text: "—", colorClass: "text-slate-500" }
+}
+
 function BitcoinBackedLendersTable({ data, sortKey, sortDir, onSort, tabConf, onEdit, onDelete }) {
+  const formatBreakdownTooltip = (raw) => {
+    if (!raw || typeof raw !== "string") return null
+    try {
+      const b = JSON.parse(raw)
+      const parts = []
+      if (b.transparency != null) parts.push(`Transparency: ${b.transparency}`)
+      if (b.riskControl != null) parts.push(`Risk Control: ${b.riskControl}`)
+      if (b.jurisdiction != null) parts.push(`Jurisdiction: ${b.jurisdiction}`)
+      if (b.structure != null) parts.push(`Structure: ${b.structure}`)
+      if (b.trackRecord != null) parts.push(`Track Record: ${b.trackRecord}`)
+      return parts.length > 0 ? parts.join(" · ") : null
+    } catch {
+      return null
+    }
+  }
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-300 bg-white dark:bg-white">
       <table className="w-full text-sm min-w-[900px]">
@@ -1844,6 +2052,8 @@ function BitcoinBackedLendersTable({ data, sortKey, sortDir, onSort, tabConf, on
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="issuerProvider" className="text-left py-3 px-4">Issuer / Provider</SortableTh>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="productInstrument" className="text-left py-3 px-4">Product / Instrument</SortableTh>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="apyCost" className="text-left py-3 px-4">APY / Cost</SortableTh>
+            <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="qualityScore" className="text-left py-3 px-4 font-semibold text-slate-700">Score</SortableTh>
+            <th className="text-left py-3 px-4 font-semibold text-slate-700" title="Risk Controls reflect how much ability a borrower has to manage leverage during market volatility.">Risk Controls</th>
             <th className="text-left py-3 px-4 font-semibold text-slate-700">Duration</th>
             <th className="text-left py-3 px-4 font-semibold text-slate-700">Collateral</th>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="jurisdiction" className="text-left py-3 px-4">Jurisdiction</SortableTh>
@@ -1861,6 +2071,12 @@ function BitcoinBackedLendersTable({ data, sortKey, sortDir, onSort, tabConf, on
               <td className="py-3 px-4 font-medium">{row.issuerProvider ?? "—"}</td>
               <td className="py-3 px-4">{row.productInstrument ?? "—"}</td>
               <td className="py-3 px-4">{row.apyCost ?? "—"}</td>
+              <td className="py-3 px-4 text-slate-700" title={formatBreakdownTooltip(row.qualityScoreBreakdown) ?? undefined}>
+                {row.qualityScore != null ? `${row.qualityScore}/100` : "—"}
+              </td>
+              <td className="py-3 px-4 max-w-[200px]" title="Risk Controls reflect how much ability a borrower has to manage leverage during market volatility.">
+                {(() => { const { text, colorClass } = getBtcLenderRiskControlsDisplay(row); return <span className={`text-xs ${colorClass}`}>{text}</span> })()}
+              </td>
               <td className="py-3 px-4 text-slate-600 max-w-[120px]">{row.duration ?? "—"}</td>
               <td className="py-3 px-4 text-slate-600 max-w-[100px]">{row.collateral ?? "—"}</td>
               <td className="py-3 px-4 text-slate-600">{row.jurisdiction ?? "—"}</td>
@@ -1923,7 +2139,7 @@ function UsdIncomeTable({ data, sortKey, sortDir, onSort, tabConf, onEdit, onDel
               <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="ticker" className="text-left py-3 px-4 font-semibold text-slate-700">Ticker / ID</SortableTh>
               <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="type" className="text-left py-3 px-4 font-semibold text-slate-700">Type</SortableTh>
               <th className="text-left py-3 px-4 font-semibold text-slate-700">APY / Distribution</th>
-              <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="qualityScore" className="text-left py-3 px-4 font-semibold text-slate-700">Score</SortableTh>
+              <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="qualityScore" className="text-left py-3 px-4 font-semibold text-slate-700">Score brut</SortableTh>
               <th className="text-left py-3 px-4 font-semibold text-slate-700">Duration</th>
               <th className="text-left py-3 px-4 font-semibold text-slate-700">Seniority</th>
               <th className="text-left py-3 px-4 font-semibold text-slate-700">HV30</th>
@@ -1942,8 +2158,14 @@ function UsdIncomeTable({ data, sortKey, sortDir, onSort, tabConf, onEdit, onDel
                 <td className="py-3 px-4 font-mono text-slate-700">{row.ticker ?? "—"}</td>
                 <td className="py-3 px-4 text-slate-700">{row.type ?? "—"}</td>
                 <td className="py-3 px-4 text-slate-700 max-w-[180px]">{row.apyDistribution ?? "—"}</td>
-                <td className="py-3 px-4 text-slate-700" title={formatBreakdownTooltip(row.qualityScoreBreakdown) ?? undefined}>
-                  {row.qualityScore != null ? `${row.qualityScore}/100` : "—"}
+                <td className="py-3 px-4 text-slate-700">
+                  {(() => {
+                    const apyNum = parseApy(row.apyDistribution)
+                    const hv30Num = row.hv30Pct != null && Number(row.hv30Pct) > 0 ? Number(row.hv30Pct) : null
+                    const ratio = apyNum != null && hv30Num != null ? apyNum / hv30Num : null
+                    if (ratio != null && Number.isFinite(ratio)) return Number(ratio).toFixed(2)
+                    return row.qualityScore != null ? Number(row.qualityScore).toFixed(2) : "—"
+                  })()}
                 </td>
                 <td className="py-3 px-4 text-slate-700">{row.duration ?? "—"}</td>
                 <td className="py-3 px-4 text-slate-700">{row.seniority ?? "—"}</td>
@@ -1996,6 +2218,7 @@ function StablecoinProductTable({ data, sortKey, sortDir, onSort, tabConf, onEdi
           <tr className="bg-slate-50 dark:bg-slate-50 border-b border-slate-200">
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="issuer" className="text-left py-3 px-4">Issuer / Provider</SortableTh>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="product" className="text-left py-3 px-4">Product / Instrument Name</SortableTh>
+            <th className="text-left py-3 px-4 font-semibold text-slate-700">Base Stablecoin</th>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="apy" className="text-left py-3 px-4">APY</SortableTh>
             <SortableTh sortKey={sortKey} sortDir={sortDir} onSort={onSort} tabConf={tabConf} columnKey="qualityScore" className="text-left py-3 px-4">Score</SortableTh>
             <th className="text-left py-3 px-4 font-semibold text-slate-700">Duration</th>
@@ -2014,8 +2237,9 @@ function StablecoinProductTable({ data, sortKey, sortDir, onSort, tabConf, onEdi
             <tr key={row.id} className="border-b border-slate-100 last:border-0 even:bg-slate-50/50">
               <td className="py-3 px-4 font-medium">{row.issuer ?? "—"}</td>
               <td className="py-3 px-4">{row.product ?? "—"}</td>
+              <td className="py-3 px-4 text-slate-600">{row.baseStablecoin ?? "—"}</td>
               <td className="py-3 px-4">{row.apy ?? "—"}</td>
-              <td className="py-3 px-4" title={formatBreakdownTooltip(row.qualityScoreBreakdown) ?? undefined}>
+              <td className="py-3 px-4">
                 {row.qualityScore != null ? (
                   <span className="font-medium tabular-nums">{row.qualityScore}/100</span>
                 ) : (

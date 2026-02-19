@@ -192,6 +192,37 @@ model BitcoinBackedLender {
   notes             String?  @db.Text
   sources           String?  @db.VarChar(512)
   category          String?  @db.VarChar(128)
+  qualityScore      Int?     @db.Int
+  qualityScoreBreakdown String?  @db.Text
+  // Transparency (0–30)
+  tosPublic                 Boolean? @db.TinyInt
+  liquidationLtvPublished   Boolean? @db.TinyInt
+  marginCallRulesPublished  Boolean? @db.TinyInt
+  feeScheduleDisclosed      String?  @db.VarChar(32)
+  collateralHandlingDisclosed String? @db.VarChar(32)
+  termsAfterOnboarding      Boolean? @db.TinyInt
+  liquidationVague          Boolean? @db.TinyInt
+  feesVariableNoRange       Boolean? @db.TinyInt
+  // Risk Control (0–25)
+  collateralTopUpSpeed   String? @db.VarChar(32)
+  partialRepayment       String? @db.VarChar(32)
+  earlyClosure           String? @db.VarChar(32)
+  marginCallGracePeriod  String? @db.VarChar(32)
+  autoRepay              Boolean? @db.TinyInt
+  autoTopUp              Boolean? @db.TinyInt
+  alerts                 Boolean? @db.TinyInt
+  // Jurisdiction (0–20)
+  governingLaw  String?  @db.VarChar(64)
+  separateSpv   Boolean? @db.TinyInt
+  // Structure (0–15)
+  custodyModel           String?  @db.VarChar(32)
+  rehypothecationAllowed Boolean? @db.TinyInt
+  btcLentOnward          Boolean? @db.TinyInt
+  counterpartyCount     String?  @db.VarChar(32)
+  // Track Record (0–10)
+  yearsOperating   Int?    @db.Int
+  knownIncidents   String? @db.VarChar(32)
+  historicalFreezes Boolean? @db.TinyInt
   createdAt         DateTime @default(now()) @db.Timestamp(6)
   updatedAt         DateTime @updatedAt @db.Timestamp(6)
 
@@ -204,6 +235,7 @@ model UsdIncomeProduct {
   product           String   @db.VarChar(255)
   ticker            String   @db.VarChar(64)
   type              String   @db.VarChar(128)
+  venue             String?  @db.VarChar(32)
   apyDistribution   String?  @db.VarChar(255)
   duration          String?  @db.VarChar(128)
   seniority         String?  @db.VarChar(128)
@@ -224,6 +256,7 @@ model StablecoinProduct {
   id           String   @id @default(uuid())
   issuer       String   @db.VarChar(255)
   product      String   @db.VarChar(512)
+  baseStablecoin String? @db.VarChar(64)
   apy          String?  @db.VarChar(128)
   duration     String?  @db.VarChar(128)
   collateral   String?  @db.VarChar(255)
@@ -239,4 +272,25 @@ model StablecoinProduct {
   updatedAt               DateTime @updatedAt @db.Timestamp(6)
 
   @@map("stablecoin_products")
+}
+
+model PageVisit {
+  id        String   @id @default(uuid())
+  userId    String   @db.VarChar(255)
+  path      String   @db.VarChar(512)
+  referrer  String?  @db.VarChar(1024)
+  createdAt DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("page_visits")
+}
+
+model SiteConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique @db.VarChar(64)
+  value     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt @db.Timestamp(6)
+
+  @@map("site_config")
 }

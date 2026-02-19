@@ -64,7 +64,7 @@ export default function Page() {
                     Start Risk Planner (Free)
                     </Link>
                     <Link href="/contact" className="border border-[#b87718] transition text-slate-600 dark:text-white rounded-md px-6 h-11 flex items-center justify-center">
-                        Contact support
+                        Contact us
                     </Link>
                 </div>
             </div>

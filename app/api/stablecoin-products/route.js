@@ -9,12 +9,21 @@ const MODEL_UNAVAILABLE = {
 
 const VALID_CATEGORIES = ['cefi_savings', 'collateralised_lending']
 
-export async function GET() {
+export async function GET(request) {
   try {
     if (!prisma?.stablecoinProduct) {
       return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })
     }
+    const url = request?.url ? new URL(request.url) : null
+    const base = url?.searchParams?.get('baseStablecoin') || ''
+    let where = {}
+    if (base === 'USDC') {
+      where = { OR: [{ baseStablecoin: 'USDC' }, { baseStablecoin: 'USDC/USDT' }, { baseStablecoin: null }] }
+    } else if (base === 'USDT') {
+      where = { OR: [{ baseStablecoin: 'USDT' }, { baseStablecoin: 'USDC/USDT' }, { baseStablecoin: null }] }
+    }
     const products = await prisma.stablecoinProduct.findMany({
+      where,
       orderBy: [{ category: 'asc' }, { issuer: 'asc' }, { product: 'asc' }],
     })
     return NextResponse.json({
@@ -57,6 +66,7 @@ export async function POST(request) {
       issuer,
       product,
       category,
+      baseStablecoin: body.baseStablecoin != null ? String(body.baseStablecoin).trim() || null : null,
       apy: body.apy != null ? String(body.apy).trim() || null : null,
       duration: body.duration != null ? String(body.duration).trim() || null : null,
       collateral: body.collateral != null ? String(body.collateral).trim() || null : null,

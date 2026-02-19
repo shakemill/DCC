@@ -7,6 +7,18 @@ import ProtectedFeature from "@/components/ProtectedFeature"
 import Breadcrumb from "@/components/Breadcrumb"
 import { ArrowLeft, Download } from "lucide-react"
 
+const BTC_SCORE_EXPLANATION = "Provider Quality Score reflects the structural characteristics of this lending platform, including transparency of rules, borrower risk controls, legal jurisdiction, structural design, and operating history. This score does not reflect market risk or personal leverage decisions."
+const BTC_SCORE_FOOTER = "Scores are based on publicly available information and do not constitute advice."
+
+function parseBreakdown(raw) {
+  if (raw == null) return null
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw) } catch { return null }
+  }
+  return null
+}
+
 function getReportTypeColor(type) {
   const colors = {
     Suitability: "bg-amber-100 text-amber-700",
@@ -190,7 +202,7 @@ export default function ReportViewPage() {
                       {fd.metrics.marginCallPrice != null && <div><span className="font-semibold">Margin call price:</span> ${fd.metrics.marginCallPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>}
                       {fd.metrics.liquidationPrice != null && <div><span className="font-semibold">Liquidation price:</span> ${fd.metrics.liquidationPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>}
                       {fd.metrics.riskIndicator && <div><span className="font-semibold">Risk:</span> {fd.metrics.riskIndicator}</div>}
-                      {fd.metrics.sri != null && <div><span className="font-semibold">SRI:</span> {fd.metrics.sri.toFixed(1)} ({fd.metrics.sriLevel})</div>}
+                      {fd.metrics.sri != null && <div><span className="font-semibold">SRI:</span> {fd.metrics.sri.toFixed(1)} ({fd.metrics.sriLevel === "lower" ? "Lower Sensitivity" : fd.metrics.sriLevel === "moderate" ? "Moderate Sensitivity" : "High Sensitivity"})</div>}
                     </div>
                   )}
                   {fd.source === "1C" && fd.metrics.venueBreakdown && (
@@ -253,6 +265,56 @@ export default function ReportViewPage() {
                   </div>
                 </div>
               )}
+
+              {fd?.btcLenderSnapshot && (() => {
+                const snap = fd.btcLenderSnapshot
+                const total = snap.qualityScore != null ? Number(snap.qualityScore) : null
+                const breakdown = parseBreakdown(snap.qualityScoreBreakdown)
+                const rows = []
+                if (breakdown?.transparency != null) rows.push({ label: "Transparency", score: breakdown.transparency, max: 30 })
+                if (breakdown?.riskControl != null) rows.push({ label: "Risk Controls", score: breakdown.riskControl, max: 25 })
+                if (breakdown?.jurisdiction != null) rows.push({ label: "Jurisdiction", score: breakdown.jurisdiction, max: 20 })
+                if (breakdown?.structure != null) rows.push({ label: "Structure", score: breakdown.structure, max: 15 })
+                if (breakdown?.trackRecord != null) rows.push({ label: "Track Record", score: breakdown.trackRecord, max: 10 })
+                const hasTable = rows.length > 0 || total != null
+                if (!hasTable) return null
+                return (
+                  <div className="mt-6 pt-6 border-t border-slate-200 space-y-3">
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-slate-900">Provider Quality Assessment</h2>
+                    {(snap.issuerProvider || snap.productInstrument) && (
+                      <p className="text-sm text-slate-600 dark:text-slate-500">
+                        {[snap.issuerProvider, snap.productInstrument].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                    <p className="text-sm text-slate-700 dark:text-slate-700">{BTC_SCORE_EXPLANATION}</p>
+                    <div className="overflow-x-auto border border-slate-200 rounded-lg max-w-md">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="text-left py-2 px-3 font-semibold">Category</th>
+                            <th className="text-right py-2 px-3 font-semibold">Score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r, i) => (
+                            <tr key={i} className="border-b border-slate-100 last:border-0">
+                              <td className="py-2 px-3">{r.label}</td>
+                              <td className="py-2 px-3 text-right tabular-nums">{r.score} / {r.max}</td>
+                            </tr>
+                          ))}
+                          {total != null && (
+                            <tr className="bg-slate-50 font-semibold">
+                              <td className="py-2 px-3">Total</td>
+                              <td className="py-2 px-3 text-right tabular-nums">{total} / 100</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-500">{BTC_SCORE_FOOTER}</p>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>

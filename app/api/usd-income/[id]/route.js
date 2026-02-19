@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { serialize } from '@/lib/serialize'
+import { computeFiatRawScore } from '@/lib/computeFiatRawScore'
 
 async function resolveId(params) {
   if (params && typeof params === 'object' && 'id' in params) return params.id
@@ -48,13 +49,11 @@ export async function PATCH(request, { params }) {
         data.hv30Pct = Number.isNaN(n) ? null : n
       }
     }
-    if (body.qualityScore !== undefined) {
-      const v = body.qualityScore
-      data.qualityScore = v == null || v === '' ? null : (typeof v === 'number' ? Math.round(v) : Math.round(Number(v))) || null
-    }
-    if (body.qualityScoreBreakdown !== undefined) {
-      data.qualityScoreBreakdown = body.qualityScoreBreakdown != null ? String(body.qualityScoreBreakdown).trim() || null : null
-    }
+    const apyForScore = data.apyDistribution !== undefined ? data.apyDistribution : existing.apyDistribution
+    const hv30ForScore = data.hv30Pct !== undefined ? data.hv30Pct : (existing.hv30Pct != null ? Number(existing.hv30Pct) : null)
+    const computedScore = computeFiatRawScore(apyForScore, hv30ForScore)
+    data.qualityScore = computedScore ?? null
+    data.qualityScoreBreakdown = null
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ success: true, product: serialize(existing) })

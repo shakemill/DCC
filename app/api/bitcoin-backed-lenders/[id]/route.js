@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { serialize } from '@/lib/serialize'
+import { computeBtcLenderQualityScore, applyBtcLenderScoringFields } from '@/lib/btcLenderScore'
 
 async function resolveId(params) {
   if (params && typeof params === 'object' && 'id' in params) return params.id
@@ -40,6 +41,12 @@ export async function PATCH(request, { params }) {
     if (body.notes !== undefined) data.notes = body.notes != null ? String(body.notes).trim() || null : null
     if (body.sources !== undefined) data.sources = body.sources != null ? String(body.sources).trim() || null : null
     if (body.category !== undefined) data.category = body.category != null ? String(body.category).trim() || null : null
+    applyBtcLenderScoringFields(data, body, { onlyDefined: true })
+
+    const merged = { ...existing, ...data }
+    const computed = computeBtcLenderQualityScore(merged)
+    data.qualityScore = computed ? computed.total : null
+    data.qualityScoreBreakdown = computed ? JSON.stringify(computed.breakdown) : null
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ success: true, lender: serialize(existing) })

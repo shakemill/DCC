@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { serialize } from '@/lib/serialize'
+import { computeBtcLenderQualityScore, applyBtcLenderScoringFields } from '@/lib/btcLenderScore'
 
 const MODEL_UNAVAILABLE = {
   success: false,
@@ -56,6 +57,15 @@ export async function POST(request) {
       notes: body.notes != null ? String(body.notes).trim() || null : null,
       sources: body.sources != null ? String(body.sources).trim() || null : null,
       category: body.category != null ? String(body.category).trim() || null : null,
+    }
+    applyBtcLenderScoringFields(data, body)
+    const computed = computeBtcLenderQualityScore(data)
+    if (computed) {
+      data.qualityScore = computed.total
+      data.qualityScoreBreakdown = JSON.stringify(computed.breakdown)
+    } else {
+      data.qualityScore = null
+      data.qualityScoreBreakdown = null
     }
     if (!prisma?.bitcoinBackedLender) {
       return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })

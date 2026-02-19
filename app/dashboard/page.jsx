@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/context/AuthContext"
 import Link from "next/link"
@@ -9,12 +9,10 @@ import {
     BarChart3, 
     FileText, 
     TrendingUp,
-    Settings,
     User,
     Crown,
     ArrowRight,
     ShieldCheck,
-    ChevronDown,
 } from "lucide-react"
 
 const dashboardCards = [
@@ -48,7 +46,7 @@ const dashboardCards = [
     {
         title: "Analytics",
         description: "View your portfolio performance and insights",
-        href: "#",
+        href: "/features/analytics",
         icon: TrendingUp,
         color: "from-green-500 to-green-600",
         bgColor: "bg-green-500/10",
@@ -63,67 +61,16 @@ const dashboardCards = [
         bgColor: "bg-slate-500/10",
         iconColor: "text-slate-500"
     },
-    {
-        title: "Settings",
-        description: "Configure your application preferences",
-        href: "#",
-        icon: Settings,
-        color: "from-gray-500 to-gray-600",
-        bgColor: "bg-gray-500/10",
-        iconColor: "text-gray-500"
-    }
 ]
 
 export default function DashboardPage() {
     const { user, loading } = useAuth()
     const router = useRouter()
-    const [savedPlansCount, setSavedPlansCount] = useState(0)
-    const [isLoadingPlans, setIsLoadingPlans] = useState(false)
-    const [adminDropdownOpen, setAdminDropdownOpen] = useState(false)
-    const adminDropdownRef = useRef(null)
-
-    useEffect(() => {
-        function handleClickOutside(e) {
-            if (adminDropdownRef.current && !adminDropdownRef.current.contains(e.target)) setAdminDropdownOpen(false)
-        }
-        if (adminDropdownOpen) document.addEventListener("mousedown", handleClickOutside)
-        return () => document.removeEventListener("mousedown", handleClickOutside)
-    }, [adminDropdownOpen])
-
     useEffect(() => {
         if (!loading && !user) {
             router.push("/login")
         }
     }, [user, loading, router])
-
-    useEffect(() => {
-        if (user) {
-            loadPlansCount()
-        }
-    }, [user])
-
-    const loadPlansCount = async () => {
-        if (!user) return
-        
-        setIsLoadingPlans(true)
-        try {
-            const response = await fetch(`/api/income-plans?userId=${user.id}`)
-            if (!response.ok) {
-                throw new Error(`Failed to load plans: ${response.status}`)
-            }
-            const data = await response.json()
-            if (data.success) {
-                setSavedPlansCount(data.plans?.length || 0)
-            }
-        } catch (error) {
-            if (process.env.NODE_ENV === 'development') {
-                console.warn("Error loading plans count:", error.message)
-            }
-            setSavedPlansCount(0)
-        } finally {
-            setIsLoadingPlans(false)
-        }
-    }
 
     if (loading) {
         return (
@@ -210,79 +157,26 @@ export default function DashboardPage() {
                             </Link>
                         )
                     })}
-                    {/* Admin card with dropdown */}
-                    <div className="relative" ref={adminDropdownRef}>
-                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8 h-full flex flex-col transition-all duration-200 hover:shadow-sm hover:border-slate-300"
+                    {/* Admin card */}
+                    <Link href="/admin" className="group">
+                        <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6 md:p-8 h-full flex flex-col transition-all duration-200 hover:shadow-sm hover:border-[#f49d1d]/30 hover:-translate-y-1 cursor-pointer"
                             style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)', backgroundColor: '#ffffff' }}
                         >
-                            <div className="w-14 h-14 rounded-xl bg-red-500/10 flex items-center justify-center mb-4">
+                            <div className="w-14 h-14 rounded-xl bg-red-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200">
                                 <ShieldCheck className="text-red-500" size={28} strokeWidth={1.5} />
                             </div>
                             <h3 className="text-xl font-bold text-slate-900 dark:text-slate-900 mb-2">Admin</h3>
                             <p className="text-slate-600 dark:text-slate-600 text-sm leading-relaxed flex-1">
                                 Access admin panel and management tools.
                             </p>
-                            <div className="mt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setAdminDropdownOpen(!adminDropdownOpen)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-medium text-sm transition"
-                                >
-                                    <span>Admin</span>
-                                    <ChevronDown size={16} className={`transition-transform ${adminDropdownOpen ? "rotate-180" : ""}`} />
-                                </button>
-                                {adminDropdownOpen && (
-                                    <div className="absolute left-6 right-6 mt-2 bg-white dark:bg-white rounded-lg shadow-lg border border-slate-200 dark:border-slate-300 py-1 z-10">
-                                        <Link
-                                            href="/admin"
-                                            onClick={() => setAdminDropdownOpen(false)}
-                                            className="block px-4 py-2 text-sm text-slate-700 dark:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-50 transition"
-                                        >
-                                            Go to Admin
-                                        </Link>
-                                    </div>
-                                )}
+                            <div className="mt-4 flex items-center text-[#f49d1d] font-medium text-sm group-hover:gap-2 transition-all">
+                                <span>Access</span>
+                                <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                             </div>
                         </div>
-                    </div>
+                    </Link>
                 </div>
 
-                {/* Quick Stats Section (Optional) */}
-                <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6"
-                        style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                    >
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Total Plans</p>
-                        <p className="text-3xl font-bold text-slate-900 dark:text-slate-900 mb-3">
-                            {isLoadingPlans ? "-" : savedPlansCount}
-                        </p>
-                        <div className="mb-2">
-                            <div className="w-full bg-slate-200 dark:bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                                <div 
-                                    className="bg-gradient-to-r from-[#f49d1d] to-[#e88a0f] h-2.5 rounded-full transition-all duration-300"
-                                    style={{ width: `${Math.min((savedPlansCount / 10) * 100, 100)}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                            {savedPlansCount} / 10 saved income plans
-                        </p>
-                    </div>
-                    <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6"
-                        style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                    >
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Reports Generated</p>
-                        <p className="text-3xl font-bold text-slate-900 dark:text-slate-900">-</p>
-                        <p className="text-xs text-slate-500 mt-2">Financial reports</p>
-                    </div>
-                    <div className="bg-white dark:bg-white rounded-2xl border border-slate-200/30 dark:border-slate-800/30 p-6"
-                        style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.025), 0 2px 4px -2px rgba(0, 0, 0, 0.025)' }}
-                    >
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Last Activity</p>
-                        <p className="text-3xl font-bold text-slate-900 dark:text-slate-900">-</p>
-                        <p className="text-xs text-slate-500 mt-2">Recent activity</p>
-                    </div>
-                </div>
             </div>
         </div>
     )

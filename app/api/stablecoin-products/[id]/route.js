@@ -34,6 +34,7 @@ export async function PATCH(request, { params }) {
     if (body.issuer != null && String(body.issuer).trim()) data.issuer = String(body.issuer).trim()
     if (body.product != null && String(body.product).trim()) data.product = String(body.product).trim()
     if (body.category != null && VALID_CATEGORIES.includes(String(body.category).trim())) data.category = String(body.category).trim()
+    if (body.baseStablecoin !== undefined) data.baseStablecoin = body.baseStablecoin != null ? String(body.baseStablecoin).trim() || null : null
     if (body.apy !== undefined) data.apy = body.apy != null ? String(body.apy).trim() || null : null
     if (body.duration !== undefined) data.duration = body.duration != null ? String(body.duration).trim() || null : null
     if (body.collateral !== undefined) data.collateral = body.collateral != null ? String(body.collateral).trim() || null : null

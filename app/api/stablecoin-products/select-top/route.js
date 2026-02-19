@@ -33,14 +33,28 @@ function selectTopByScore(products) {
   return { collateralisedLending: lending, cefiSavings: cefi }
 }
 
-/** POST /api/stablecoin-products/select-top – top 3 per category by qualityScore (from DB) */
-export async function POST() {
+/** POST /api/stablecoin-products/select-top – top 3 per category by qualityScore (from DB). Optionally filter by baseStablecoin. */
+export async function POST(request) {
   try {
     if (!prisma?.stablecoinProduct) {
       return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })
     }
 
+    let where = {}
+    try {
+      const body = await request.json().catch(() => ({}))
+      const base = body?.baseStablecoin != null ? String(body.baseStablecoin).trim() : ''
+      if (base === 'USDC') {
+        where = { OR: [{ baseStablecoin: 'USDC' }, { baseStablecoin: 'USDC/USDT' }, { baseStablecoin: null }] }
+      } else if (base === 'USDT') {
+        where = { OR: [{ baseStablecoin: 'USDT' }, { baseStablecoin: 'USDC/USDT' }, { baseStablecoin: null }] }
+      }
+    } catch {
+      // Ignore body parse errors, fetch all
+    }
+
     const products = await prisma.stablecoinProduct.findMany({
+      where,
       orderBy: [{ category: 'asc' }, { issuer: 'asc' }],
     })
 

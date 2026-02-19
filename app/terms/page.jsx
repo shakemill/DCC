@@ -166,7 +166,7 @@ export default function TermsPage() {
             <h2 className="text-2xl font-bold mb-4 text-slate-900 dark:text-slate-900">11. Contact Information</h2>
             <p className="text-slate-700 dark:text-slate-600 mb-4 leading-relaxed">
               If you have any questions about these Terms of Service, please{" "}
-              <a href="/contact" className="text-[#f49d1d] hover:underline">contact support</a>.
+              <a href="mailto:support@digitalcreditcompass.com" className="text-[#f49d1d] hover:underline">contact support</a>.
             </p>
           </section>
         </div>

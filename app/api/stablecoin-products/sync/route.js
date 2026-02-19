@@ -134,6 +134,7 @@ const HEADER_TO_KEY = {
   'product / instrument': 'product',
   'product/instrument name': 'product',
   'product/instrument': 'product',
+  'base stablecoin': 'baseStablecoin',
   'apy': 'apy',
   'duration': 'duration',
   'collateral': 'collateral',
@@ -177,6 +178,7 @@ function toRow(item, category) {
   return {
     issuer: str(item?.issuer) || 'Unknown',
     product: str(item?.product) || 'Unknown',
+    baseStablecoin: str(item?.baseStablecoin),
     apy: str(item?.apy),
     duration: str(item?.duration),
     collateral: str(item?.collateral),

@@ -46,10 +46,7 @@ export default function Footer() {
                         </ul>
                     </div>
                     <div>
-                        <Link href="/contact" className="inline-block text-xs font-medium text-[#f49d1d] hover:underline">
-                            Contact us →
-                        </Link>
-                        <a href="mailto:support@digitalcreditcompass.com" className="block mt-1 text-xs text-slate-600 dark:text-slate-400 hover:text-[#f49d1d] transition">
+                        <a href="mailto:support@digitalcreditcompass.com" className="inline-block text-xs font-medium text-[#f49d1d] hover:underline">
                             support@digitalcreditcompass.com
                         </a>
                         <div className="mt-3 flex items-center gap-3">

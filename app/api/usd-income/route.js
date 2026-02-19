@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { serialize } from '@/lib/serialize'
+import { computeFiatRawScore } from '@/lib/computeFiatRawScore'
 
 const MODEL_UNAVAILABLE = {
   success: false,
@@ -50,19 +51,24 @@ export async function POST(request) {
       body.hv30Pct != null && body.hv30Pct !== ''
         ? (typeof body.hv30Pct === 'number' ? body.hv30Pct : Number(String(body.hv30Pct).trim().replace(/%/g, '')))
         : null
+    const apyDistribution = body.apyDistribution != null ? String(body.apyDistribution).trim() || null : null
+    const hv30Final = typeof hv30Pct === 'number' && !Number.isNaN(hv30Pct) ? hv30Pct : null
+    const qualityScore = computeFiatRawScore(apyDistribution, hv30Final)
     const data = {
       issuer,
       product,
       ticker,
       type,
-      apyDistribution: body.apyDistribution != null ? String(body.apyDistribution).trim() || null : null,
+      apyDistribution,
       duration: body.duration != null ? String(body.duration).trim() || null : null,
       seniority: body.seniority != null ? String(body.seniority).trim() || null : null,
-      hv30Pct: typeof hv30Pct === 'number' && !Number.isNaN(hv30Pct) ? hv30Pct : null,
+      hv30Pct: hv30Final,
       simpleDescription: body.simpleDescription != null ? String(body.simpleDescription).trim() || null : null,
       availability: body.availability != null ? String(body.availability).trim() || null : null,
       btcLinkage: body.btcLinkage != null ? String(body.btcLinkage).trim() || null : null,
       keyRisks: body.keyRisks != null ? String(body.keyRisks).trim() || null : null,
+      qualityScore: qualityScore ?? null,
+      qualityScoreBreakdown: null,
     }
     if (!prisma?.usdIncomeProduct) {
       return NextResponse.json(MODEL_UNAVAILABLE, { status: 503 })

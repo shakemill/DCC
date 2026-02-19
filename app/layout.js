@@ -5,6 +5,8 @@ import { AuthContextProvider } from "@/context/AuthContext";
 import LenisScroll from "@/components/Lenis";
 import CookieBanner from "@/components/CookieBanner";
 import InactivityModal from "@/components/InactivityModal";
+import AnalyticsTracker from "@/components/AnalyticsTracker";
+import ComingSoonGate from "@/components/ComingSoonGate";
 
 const poppins = Poppins({
     variable: "--font-poppins",
@@ -26,10 +28,13 @@ export default function RootLayout({ children }) {
             <body>
                 <ThemeContextProvider>
                     <AuthContextProvider>
+                        <ComingSoonGate>
+                        <AnalyticsTracker />
                         <LenisScroll />
                         {children}
                         <CookieBanner />
                         <InactivityModal />
+                        </ComingSoonGate>
                     </AuthContextProvider>
                 </ThemeContextProvider>
             </body>

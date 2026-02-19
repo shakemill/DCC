@@ -9,7 +9,7 @@ const MODEL_UNAVAILABLE = {
 const VALID_CATEGORIES = ['cefi_savings', 'collateralised_lending']
 
 const ALLOWED_KEYS = new Set([
-  'issuer', 'product', 'apy', 'duration', 'collateral', 'jurisdiction',
+  'issuer', 'product', 'baseStablecoin', 'apy', 'duration', 'collateral', 'jurisdiction',
   'lockup', 'seniority', 'notes', 'sources', 'category',
 ])
 
